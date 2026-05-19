@@ -1,0 +1,27 @@
+{
+  "_comment": "Maps each action to a MIDI message. Fill in after MIDI-Learning controls inside VirtualDJ. Channel is 1-indexed. Notes/CCs are 0-127.",
+  "play_deck": {
+    "1": { "type": "note_on", "channel": 1, "note": 60, "velocity": 127 },
+    "2": { "type": "note_on", "channel": 1, "note": 62, "velocity": 127 }
+  },
+  "pause_deck": {
+    "1": { "type": "note_on", "channel": 1, "note": 61, "velocity": 127 },
+    "2": { "type": "note_on", "channel": 1, "note": 63, "velocity": 127 }
+  },
+  "set_crossfader": {
+    "type": "control_change",
+    "channel": 1,
+    "controller": 20,
+    "_note": "value 0-127 set per call from the action's float 0.0-1.0"
+  },
+  "loop_deck": {
+    "1": { "type": "note_on", "channel": 1, "note": 70, "velocity": 127 },
+    "2": { "type": "note_on", "channel": 1, "note": 71, "velocity": 127 }
+  },
+  "nudge_deck": {
+    "1_forward": { "type": "note_on", "channel": 1, "note": 80, "velocity": 127 },
+    "1_back":    { "type": "note_on", "channel": 1, "note": 81, "velocity": 127 },
+    "2_forward": { "type": "note_on", "channel": 1, "note": 82, "velocity": 127 },
+    "2_back":    { "type": "note_on", "channel": 1, "note": 83, "velocity": 127 }
+  }
+}

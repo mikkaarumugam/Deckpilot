@@ -1,0 +1,23 @@
+[project]
+name = "deckpilot"
+version = "0.1.0"
+description = "Natural-language control layer for DJ software."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Mikka Arumugam", email = "mikka.arumugam@gmail.com" }]
+
+# Keep dependencies minimal on purpose.
+dependencies = [
+  "python-rtmidi>=1.5.8",  # talk to macOS IAC Driver (virtual MIDI)
+  "anthropic>=0.40.0",     # LLM parser
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["deckpilot*"]
