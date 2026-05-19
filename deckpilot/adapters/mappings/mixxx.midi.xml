@@ -1,0 +1,47 @@
+<?xml version='1.0' encoding='utf-8'?>
+<!--
+DeckPilot — MIDI mapping for Mixxx.
+
+Source of truth for the Mixxx-side bindings. Mixxx loads this from its
+controllers/ folder; we keep a copy here in the repo so the mapping is
+version-controlled and reproducible.
+
+To install on a fresh Mac:
+    cp deckpilot/adapters/mappings/mixxx.midi.xml \
+      "$HOME/Library/Containers/org.mixxx.mixxx/Data/Library/Application Support/Mixxx/controllers/DeckPilot.midi.xml"
+then load "DeckPilot" in Mixxx → Preferences → Controllers → IAC Driver Bus 1.
+
+MIDI conventions used here:
+  - status 0x90 = note_on, channel 1
+  - midino is the note number in hex (e.g. 0x3C = 60 = middle C)
+
+Mixxx control reference:
+  - [Channel1] = deck 1, [Channel2] = deck 2
+  - "start_play" = trigger, fires once on press, ignores 0 (release)
+
+We use "start_play" rather than "play" because our test script sends
+note_on then note_off 0.5s later; a setter would toggle the deck back off.
+-->
+<MixxxControllerPreset schemaVersion="1" mixxxVersion="2.3.0+">
+    <info>
+        <name>DeckPilot</name>
+        <author>Mikka Arumugam</author>
+        <description>Natural-language DJ control via virtual MIDI (IAC Driver).</description>
+    </info>
+    <controller id="IAC Driver Bus 1">
+        <scriptfiles/>
+        <controls>
+            <!-- M1 test binding: note 60 (middle C) → start deck 1 playing -->
+            <control>
+                <group>[Channel1]</group>
+                <key>start_play</key>
+                <status>0x90</status>
+                <midino>0x3C</midino>
+                <options>
+                    <normal/>
+                </options>
+            </control>
+        </controls>
+        <outputs/>
+    </controller>
+</MixxxControllerPreset>

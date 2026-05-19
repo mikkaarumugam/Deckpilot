@@ -34,20 +34,32 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the long version.
 
 ## Quickstart
 
+DeckPilot targets **Mixxx** (free, open-source) as its primary DJ host. The adapter pattern lets you point it at any MIDI-capable DJ software, but Mixxx is the reproducible default — no licensing dance, mapping files live as XML.
+
 ```bash
 # 1. Clone and install
 git clone <this-repo> && cd deckpilot
+python -m venv .venv && source .venv/bin/activate
 python -m pip install -e .
 
-# 2. Enable macOS virtual MIDI
+# 2. Install Mixxx
+brew install --cask mixxx
+
+# 3. Enable macOS virtual MIDI
 # Open Audio MIDI Setup → IAC Driver → check "Device is online"
 
-# 3. Verify Python can see the MIDI port
+# 4. Copy the Mixxx mapping into Mixxx's controllers folder
+cp deckpilot/adapters/mappings/mixxx.midi.xml \
+   "$HOME/Library/Containers/org.mixxx.mixxx/Data/Library/Application Support/Mixxx/controllers/DeckPilot.midi.xml"
+
+# 5. Launch Mixxx, then: Preferences → Controllers → IAC Driver Bus 1 →
+#    load mapping "DeckPilot" → check "Enabled" → Apply
+
+# 6. Verify Python can talk to MIDI and Mixxx responds
 python scripts/send_test_note.py
+# (with a track loaded on Deck 1 and paused, this starts playback)
 
-# 4. In VirtualDJ: MIDI Learn the test note to "play deck 1"
-
-# 5. Run a command
+# 7. Run a natural-language command
 python -m deckpilot "play deck 1"
 python -m deckpilot "fade to deck 2 over 8 seconds"
 ```
