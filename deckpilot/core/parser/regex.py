@@ -27,7 +27,21 @@ from deckpilot.core.actions import (
     PauseDeck,
     PlayDeck,
     SetCrossfader,
+    SetEQ,
+    Sync,
 )
+
+
+def _band(name: str) -> str:
+    """Normalize 'bass'/'low(s)' → 'low', 'mid(s)' → 'mid', 'high(s)'/'treble' → 'high'."""
+    name = name.lower()
+    if name == "bass" or name.startswith("low"):
+        return "low"
+    if name.startswith("mid"):
+        return "mid"
+    if name.startswith("high") or name == "treble":
+        return "high"
+    raise ValueError(f"unknown EQ band: {name!r}")
 
 
 RULES: list[tuple[re.Pattern[str], Callable[[re.Match[str]], DJAction]]] = [
@@ -77,6 +91,65 @@ RULES: list[tuple[re.Pattern[str], Callable[[re.Match[str]], DJAction]]] = [
             deck=int(m["deck"]),
             direction="back" if m["direction"] in {"back", "backward"} else "forward",
         ),
+    ),
+
+    # --- atomic shortcuts added in latency-opt pass ---
+    # These move the most common single-action phrasings off the LLM path
+    # (~1s → <1ms). Multi-step intents like "bass swap" still go to the LLM.
+
+    # bare "play" / "start" → deck 1 default
+    (
+        re.compile(r"^(?:play|start)\s*$"),
+        lambda m: PlayDeck(deck=1),
+    ),
+
+    # bare "pause" / "stop" → deck 1 default
+    (
+        re.compile(r"^(?:pause|stop)\s*$"),
+        lambda m: PauseDeck(deck=1),
+    ),
+
+    # "kill the bass" / "cut the mids on deck 2" / "drop the highs"
+    (
+        re.compile(
+            r"^(?:kill|cut|drop|mute)\s+(?:the\s+)?"
+            r"(?P<band>bass|lows?|mids?|highs?|treble)"
+            r"(?:\s+on\s+deck\s+(?P<deck>[12]))?\s*$"
+        ),
+        lambda m: SetEQ(
+            deck=int(m["deck"] or 1),
+            band=_band(m["band"]),  # type: ignore[arg-type]
+            value=0.0,
+        ),
+    ),
+
+    # "bring back the bass" / "restore the highs on deck 2" / "turn on bass"
+    (
+        re.compile(
+            r"^(?:bring\s+back|restore|turn\s+on|return)\s+(?:the\s+)?"
+            r"(?P<band>bass|lows?|mids?|highs?|treble)"
+            r"(?:\s+on\s+deck\s+(?P<deck>[12]))?\s*$"
+        ),
+        lambda m: SetEQ(
+            deck=int(m["deck"] or 1),
+            band=_band(m["band"]),  # type: ignore[arg-type]
+            value=1.0,
+        ),
+    ),
+
+    # "sync deck 1" / "sync deck 2"
+    (
+        re.compile(r"^sync\s+deck\s+(?P<deck>[12])\s*$"),
+        lambda m: Sync(deck=int(m["deck"])),
+    ),
+
+    # "stop loop" / "kill loop" / "exit loop" / "turn off loop" (deck 1 default)
+    (
+        re.compile(
+            r"^(?:stop|kill|exit|end|turn\s+off)\s+(?:the\s+)?loop"
+            r"(?:\s+on\s+deck\s+(?P<deck>[12]))?\s*$"
+        ),
+        lambda m: LoopDeck(deck=int(m["deck"] or 1), beats=8),
     ),
 ]
 

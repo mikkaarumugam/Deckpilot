@@ -21,6 +21,8 @@ from deckpilot.core.actions import (
     PauseDeck,
     PlayDeck,
     SetCrossfader,
+    SetEQ,
+    Sync,
 )
 from deckpilot.core.parser import ParseError, regex, parse
 
@@ -57,6 +59,36 @@ from deckpilot.core.parser import ParseError, regex, parse
     ("nudge deck 1 forward", NudgeDeck(deck=1, direction="forward")),
     ("nudge deck 2 back", NudgeDeck(deck=2, direction="back")),
     ("nudge deck 1 backward", NudgeDeck(deck=1, direction="back")),
+
+    # bare play/pause default to deck 1
+    ("play", PlayDeck(deck=1)),
+    ("start", PlayDeck(deck=1)),
+    ("pause", PauseDeck(deck=1)),
+    ("stop", PauseDeck(deck=1)),
+
+    # kill / cut / drop EQ
+    ("kill the bass", SetEQ(deck=1, band="low", value=0.0)),
+    ("cut the bass", SetEQ(deck=1, band="low", value=0.0)),
+    ("kill the bass on deck 2", SetEQ(deck=2, band="low", value=0.0)),
+    ("kill the mids", SetEQ(deck=1, band="mid", value=0.0)),
+    ("drop the highs on deck 2", SetEQ(deck=2, band="high", value=0.0)),
+    ("mute the lows", SetEQ(deck=1, band="low", value=0.0)),
+
+    # bring back / restore / turn on EQ
+    ("bring back the bass", SetEQ(deck=1, band="low", value=1.0)),
+    ("restore the bass on deck 2", SetEQ(deck=2, band="low", value=1.0)),
+    ("turn on bass", SetEQ(deck=1, band="low", value=1.0)),
+    ("return the highs on deck 1", SetEQ(deck=1, band="high", value=1.0)),
+
+    # sync
+    ("sync deck 1", Sync(deck=1)),
+    ("sync deck 2", Sync(deck=2)),
+
+    # loop off variants
+    ("stop loop", LoopDeck(deck=1, beats=8)),
+    ("kill loop", LoopDeck(deck=1, beats=8)),
+    ("turn off the loop", LoopDeck(deck=1, beats=8)),
+    ("exit loop on deck 2", LoopDeck(deck=2, beats=8)),
 ])
 def test_regex_parse_matches(text: str, expected_action) -> None:
     """Each canonical phrasing produces a 1-step plan with the expected action at t=0."""
