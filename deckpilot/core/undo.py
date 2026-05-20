@@ -66,6 +66,28 @@ def inverse_action(action: DJAction) -> DJAction | None:
     return None
 
 
+def reset_plan() -> ActionPlan:
+    """
+    Return a 'go to known-good state' plan: pause both decks, crossfader to
+    center, all EQs to neutral, volumes to full. Useful as a panic button
+    when the system gets into a weird state mid-set.
+    """
+    steps: list[TimedAction] = [
+        TimedAction(action=PauseDeck(deck=1), at_seconds=0.0),
+        TimedAction(action=PauseDeck(deck=2), at_seconds=0.0),
+        TimedAction(action=SetCrossfader(value=NEUTRAL_CROSSFADER), at_seconds=0.0),
+        TimedAction(action=SetVolume(deck=1, value=NEUTRAL_VOLUME), at_seconds=0.0),
+        TimedAction(action=SetVolume(deck=2, value=NEUTRAL_VOLUME), at_seconds=0.0),
+    ]
+    for deck in (1, 2):
+        for band in ("low", "mid", "high"):
+            steps.append(TimedAction(
+                action=SetEQ(deck=deck, band=band, value=NEUTRAL_EQ),  # type: ignore[arg-type]
+                at_seconds=0.0,
+            ))
+    return ActionPlan(steps=tuple(steps))
+
+
 def inverse_plan(plan: ActionPlan) -> ActionPlan | None:
     """
     Inverse the whole plan: reverse the order, invert each step, drop the

@@ -1,15 +1,14 @@
 """
 DeckPilot dashboard — Streamlit frontend for the DJ control system.
 
-What this gives you that the CLI doesn't:
-  - A focused text input you can type or dictate into.
-  - The parsed plan renders BEFORE audio fires — the AI's structured
-    output is visible while execution happens, so you build trust in
-    the system without needing an explicit "confirm" click.
-  - One-click ↶ undo on every history entry. The cost of an AI miss is
-    bounded by recovery time, not action permanence.
-  - A running history of every command, what source parsed it
-    (regex vs LLM), and how long parsing + execution took.
+UX patterns at play:
+  - Plan-visible-before-audio: st.status renders the parsed plan table
+    BEFORE the executor fires the MIDI. Eyes confirm before ears.
+  - One-click undo per history entry, with computed inverses.
+  - Queue: pre-build a sequence of commands, review/reorder, then commit.
+    Same surface that an agent would use to expose its plan.
+  - Reset state: hard "go back to neutral" button — pause decks, crossfader
+    center, EQs and volumes to default. Useful when something gets weird.
 
 Run:
     streamlit run app/dashboard.py
@@ -29,7 +28,7 @@ from deckpilot.core.executor import Executor
 from deckpilot.core.parser import parse as facade_parse
 from deckpilot.core.parser import regex as regex_parser
 from deckpilot.core.parser.errors import ParseError
-from deckpilot.core.undo import inverse_plan
+from deckpilot.core.undo import inverse_plan, reset_plan
 
 
 PRESETS = [
@@ -55,6 +54,7 @@ def get_executor() -> Executor:
 
 def init_state() -> None:
     st.session_state.setdefault("history", [])
+    st.session_state.setdefault("queue", [])  # list[str] of pending commands
 
 
 # ---------------------------------------------------------------------------
@@ -62,7 +62,6 @@ def init_state() -> None:
 # ---------------------------------------------------------------------------
 
 def parse_with_metadata(text: str) -> tuple[ActionPlan, str, float]:
-    """Parse and return (plan, source, parse_seconds)."""
     start = time.monotonic()
     plan = regex_parser.parse(text)
     if plan is not None:
@@ -89,13 +88,12 @@ def _render_plan_table(plan: ActionPlan) -> None:
 
 
 def execute_command(text: str) -> None:
-    """Parse text, render the plan, execute, and log to history."""
+    """Parse text, render the plan, execute, log to history."""
     text = text.strip()
     if not text:
         return
 
     with st.status("Parsing...", expanded=True) as status:
-        # --- Parse ---
         try:
             plan, source, parse_latency = parse_with_metadata(text)
         except ParseError as exc:
@@ -110,7 +108,6 @@ def execute_command(text: str) -> None:
             })
             return
 
-        # --- Show parsed plan immediately ---
         source_label = "⚡ regex" if source == "regex" else "🤖 LLM"
         st.markdown(
             f"**Input:** `{text}`  ·  **Source:** {source_label}  ·  "
@@ -121,7 +118,6 @@ def execute_command(text: str) -> None:
             label=f"Plan ready ({len(plan.steps)} step{'s' if len(plan.steps) != 1 else ''}). Executing..."
         )
 
-        # --- Execute ---
         executor = get_executor()
         exec_start = time.monotonic()
         executor.run_plan(plan)
@@ -144,32 +140,43 @@ def execute_command(text: str) -> None:
     })
 
 
-def execute_undo(undo_plan: ActionPlan, original_text: str) -> None:
-    """Execute a pre-computed undo plan, with its own status panel."""
-    with st.status(f"Undoing: {original_text!r}", expanded=True) as status:
-        st.markdown(f"**Undo plan** · {len(undo_plan.steps)} step{'s' if len(undo_plan.steps) != 1 else ''}")
-        _render_plan_table(undo_plan)
-        status.update(label="Executing undo...")
-
+def execute_plan_with_status(plan: ActionPlan, label: str, log_text: str) -> None:
+    """Execute a pre-computed plan (undo, reset, etc.) with its own status panel."""
+    with st.status(label, expanded=True) as status:
+        st.markdown(f"**Plan** · {len(plan.steps)} step{'s' if len(plan.steps) != 1 else ''}")
+        _render_plan_table(plan)
+        status.update(label=f"Executing: {label}...")
         executor = get_executor()
         exec_start = time.monotonic()
-        executor.run_plan(undo_plan)
+        executor.run_plan(plan)
         exec_latency = time.monotonic() - exec_start
-
-        status.update(label=f"Undo done · {exec_latency:.2f}s", state="complete")
+        status.update(label=f"Done · {exec_latency:.2f}s", state="complete")
 
     st.session_state.history.insert(0, {
         "time": time.strftime("%H:%M:%S"),
-        "text": f"↶ undo: {original_text}",
-        "summary": f"{len(undo_plan.steps)} steps",
+        "text": log_text,
+        "summary": f"{len(plan.steps)} steps",
         "status": "✓",
-        "detail": f"undo, {exec_latency:.2f}s exec",
-        "plan": None,   # don't allow undo-of-undo
+        "detail": f"system, {exec_latency:.2f}s exec",
+        "plan": None,  # system-generated plans aren't user-undoable
     })
 
 
+def execute_queue() -> None:
+    """Run every queued command in order."""
+    queue: list[str] = st.session_state.queue
+    if not queue:
+        return
+    st.session_state.queue = []   # consume up-front so a failure doesn't loop
+    for text in queue:
+        execute_command(text)
+
+
+# ---------------------------------------------------------------------------
+# History interactions
+# ---------------------------------------------------------------------------
+
 def _trigger_undo(entry_index: int) -> None:
-    """Compute the inverse plan and stash it for the next rerun to execute."""
     entry = st.session_state.history[entry_index]
     plan = entry.get("plan")
     if plan is None:
@@ -179,10 +186,47 @@ def _trigger_undo(entry_index: int) -> None:
     if inv is None:
         st.toast("This command can't be cleanly undone.", icon="⚠️")
         return
-    # Defer to next rerun so the status panel renders in the consistent spot
-    # below the input area, not jammed into the history row.
-    st.session_state.pending_undo = (inv, entry["text"])
+    st.session_state.pending_system_plan = (inv, f"↶ undo: {entry['text']}", "Undoing...")
     st.rerun()
+
+
+def _trigger_reset() -> None:
+    st.session_state.pending_system_plan = (
+        reset_plan(), "🎚️ reset Mixxx state", "Resetting Mixxx state..."
+    )
+    st.rerun()
+
+
+def _trigger_clear_history() -> None:
+    st.session_state.history = []
+    st.toast("History cleared.", icon="🧹")
+
+
+# ---------------------------------------------------------------------------
+# Rendering
+# ---------------------------------------------------------------------------
+
+def render_queue() -> None:
+    queue: list[str] = st.session_state.queue
+    header_col, run_col, clear_col = st.columns([5, 2, 2])
+    header_col.markdown(f"**📥 Queue ({len(queue)})**")
+    if queue:
+        if run_col.button("Run queue", type="primary", width="stretch", key="run_queue"):
+            execute_queue()
+        if clear_col.button("Clear", width="stretch", key="clear_queue"):
+            st.session_state.queue = []
+            st.toast("Queue cleared.", icon="🧹")
+    else:
+        st.caption("(empty — submit with the Queue button to add)")
+        return
+
+    for i, text in enumerate(queue):
+        idx_col, text_col, remove_col = st.columns([1, 8, 1])
+        idx_col.text(f"{i + 1}.")
+        text_col.text(f'"{text}"')
+        if remove_col.button("✕", key=f"queue_remove_{i}", help="Remove from queue"):
+            st.session_state.queue.pop(i)
+            st.rerun()
 
 
 def render_history() -> None:
@@ -214,18 +258,22 @@ def main() -> None:
     st.caption("Natural-language control for Mixxx · MIDI via IAC Driver")
 
     submit_text: str | None = None
+    queue_text: str | None = None
 
-    # --- Input form ---
-    with st.form("command_form", clear_on_submit=False):
+    # --- Input form (Execute + Queue) ---
+    with st.form("command_form", clear_on_submit=True):
         text = st.text_input(
             "Command",
             placeholder="Type a command, e.g. 'bass swap into deck 2'",
             label_visibility="collapsed",
         )
-        if st.form_submit_button("Execute", type="primary", width="stretch"):
+        exec_col, queue_col = st.columns(2)
+        if exec_col.form_submit_button("Execute", type="primary", width="stretch"):
             submit_text = text.strip() or None
+        if queue_col.form_submit_button("Queue", width="stretch"):
+            queue_text = text.strip() or None
 
-    # --- Preset buttons ---
+    # --- Presets (always execute, never queue — they're for the demo) ---
     st.markdown("**Try these:**")
     cols = st.columns(2)
     for i, preset in enumerate(PRESETS):
@@ -235,16 +283,32 @@ def main() -> None:
 
     st.divider()
 
-    # --- Command execution area (consistent location for both fresh commands and undos) ---
-    pending_undo = st.session_state.pop("pending_undo", None)
-    if submit_text:
-        execute_command(submit_text)
-    elif pending_undo is not None:
-        undo_plan, original_text = pending_undo
-        execute_undo(undo_plan, original_text)
+    # --- Queue panel ---
+    render_queue()
+    if queue_text:
+        st.session_state.queue.append(queue_text)
+        st.rerun()
 
     st.divider()
-    st.subheader("📜 History  ·  click ↶ to undo")
+
+    # --- Execution area: fresh command OR a deferred system plan (undo/reset) ---
+    pending_system = st.session_state.pop("pending_system_plan", None)
+    if submit_text:
+        execute_command(submit_text)
+    elif pending_system is not None:
+        plan, log_text, status_label = pending_system
+        execute_plan_with_status(plan, status_label, log_text)
+
+    st.divider()
+
+    # --- History panel with utility buttons ---
+    title_col, clear_col, reset_col = st.columns([6, 2, 2])
+    title_col.subheader("📜 History  ·  click ↶ to undo")
+    if clear_col.button("🧹 Clear history", width="stretch", key="clear_history"):
+        _trigger_clear_history()
+    if reset_col.button("🎚️ Reset Mixxx", width="stretch", help="Pause both decks, center crossfader, EQs and volumes to neutral", key="reset_state"):
+        _trigger_reset()
+
     render_history()
 
 
