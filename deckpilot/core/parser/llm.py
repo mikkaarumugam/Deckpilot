@@ -40,6 +40,13 @@ from .errors import ParseError
 CLAUDE_BINARY = "claude"
 TIMEOUT_SECONDS = 30
 
+# Pin to Haiku. Parsing is a classification task with constrained JSON output;
+# the system prompt does the heavy lifting via schema + examples, so a small
+# fast model is correct. Sonnet/Opus would be wasted spend + latency.
+# If accuracy drops on edge cases (track via tests/eval.py), the right move is
+# to route fancier cases to Sonnet, not to upgrade the default.
+LLM_MODEL = "haiku"
+
 
 SYSTEM_PROMPT = """\
 You are a parser for a DJ-control system called DeckPilot. Convert a
@@ -128,7 +135,7 @@ def parse(text: str) -> ActionPlan:
 
     try:
         result = subprocess.run(
-            [CLAUDE_BINARY, "-p", full_prompt],
+            [CLAUDE_BINARY, "-p", "--model", LLM_MODEL, full_prompt],
             capture_output=True, text=True,
             timeout=TIMEOUT_SECONDS, check=True,
         )
