@@ -2,25 +2,31 @@
 <!--
 DeckPilot — MIDI mapping for Mixxx.
 
-Source of truth for the Mixxx-side bindings. Mixxx loads this from its
+Source of truth for Mixxx-side bindings. Mixxx loads this from its
 controllers/ folder; we keep a copy here in the repo so the mapping is
 version-controlled and reproducible.
 
 To install on a fresh Mac:
-    cp deckpilot/adapters/mappings/mixxx.midi.xml \
-      "$HOME/Library/Containers/org.mixxx.mixxx/Data/Library/Application Support/Mixxx/controllers/DeckPilot.midi.xml"
+    DEST="$HOME/Library/Containers/org.mixxx.mixxx/Data/Library/Application Support/Mixxx/controllers"
+    cp deckpilot/adapters/mappings/mixxx.midi.xml "$DEST/DeckPilot.midi.xml"
+    cp deckpilot/adapters/mappings/mixxx.midi.js  "$DEST/DeckPilot.midi.js"
 then load "DeckPilot" in Mixxx → Preferences → Controllers → IAC Driver Bus 1.
 
 MIDI conventions used here:
   - status 0x90 = note_on, channel 1
-  - midino is the note number in hex (e.g. 0x3C = 60 = middle C)
+  - status 0xB0 = control_change (CC), channel 1
+  - midino is the value in hex (e.g. 0x3C = 60 = middle C)
 
-Mixxx control reference:
-  - [Channel1] = deck 1, [Channel2] = deck 2
-  - "start_play" = trigger, fires once on press, ignores 0 (release)
+Two binding modes are used:
+  - <normal/>         — Mixxx scales velocity (0..127) to control value (0..1).
+                        Used for the crossfader, loop toggles, and nudges
+                        where velocity-as-value semantics work fine.
+  - <script-binding/> — Calls a JS handler in DeckPilot.midi.js. Used for
+                        play/pause because MIDI "velocity 0" gets dropped as
+                        note_off before <normal/> sees it.
 
-We use "start_play" rather than "play" because our test script sends
-note_on then note_off 0.5s later; a setter would toggle the deck back off.
+Note numbers map to Python-side action handlers in deckpilot/adapters/midi.py.
+Keep both files in sync — if you change a note here, change it there too.
 -->
 <MixxxControllerPreset schemaVersion="1" mixxxVersion="2.3.0+">
     <info>
@@ -29,18 +35,108 @@ note_on then note_off 0.5s later; a setter would toggle the deck back off.
         <description>Natural-language DJ control via virtual MIDI (IAC Driver).</description>
     </info>
     <controller id="IAC Driver Bus 1">
-        <scriptfiles/>
+        <scriptfiles>
+            <file functionprefix="DeckPilot" filename="DeckPilot.midi.js"/>
+        </scriptfiles>
         <controls>
-            <!-- M1 test binding: note 60 (middle C) → start deck 1 playing -->
+
+            <!-- ===== Play / Pause (via JS so each intent has its own note) ===== -->
+            <!-- Note 60 → play deck 1 -->
             <control>
                 <group>[Channel1]</group>
-                <key>start_play</key>
+                <key>DeckPilot.playDeck1</key>
                 <status>0x90</status>
                 <midino>0x3C</midino>
-                <options>
-                    <normal/>
-                </options>
+                <options><script-binding/></options>
             </control>
+            <!-- Note 61 → pause deck 1 -->
+            <control>
+                <group>[Channel1]</group>
+                <key>DeckPilot.pauseDeck1</key>
+                <status>0x90</status>
+                <midino>0x3D</midino>
+                <options><script-binding/></options>
+            </control>
+            <!-- Note 62 → play deck 2 -->
+            <control>
+                <group>[Channel2]</group>
+                <key>DeckPilot.playDeck2</key>
+                <status>0x90</status>
+                <midino>0x3E</midino>
+                <options><script-binding/></options>
+            </control>
+            <!-- Note 63 → pause deck 2 -->
+            <control>
+                <group>[Channel2]</group>
+                <key>DeckPilot.pauseDeck2</key>
+                <status>0x90</status>
+                <midino>0x3F</midino>
+                <options><script-binding/></options>
+            </control>
+
+            <!-- ===== Crossfader ===== -->
+            <!-- CC 20 on ch.1 → crossfader position.
+                 Mixxx scales 0..127 to its internal -1..+1 range automatically. -->
+            <control>
+                <group>[Master]</group>
+                <key>crossfader</key>
+                <status>0xB0</status>
+                <midino>0x14</midino>
+                <options><normal/></options>
+            </control>
+
+            <!-- ===== Loop (fixed 8 beats for v0.1) ===== -->
+            <!-- Note 70 → toggle 8-beat loop on deck 1 -->
+            <control>
+                <group>[Channel1]</group>
+                <key>beatloop_8_toggle</key>
+                <status>0x90</status>
+                <midino>0x46</midino>
+                <options><normal/></options>
+            </control>
+            <!-- Note 71 → toggle 8-beat loop on deck 2 -->
+            <control>
+                <group>[Channel2]</group>
+                <key>beatloop_8_toggle</key>
+                <status>0x90</status>
+                <midino>0x47</midino>
+                <options><normal/></options>
+            </control>
+
+            <!-- ===== Nudge (rate_temp_up/down behaves like hold-to-nudge) ===== -->
+            <!-- Note 80 → nudge deck 1 forward while pressed -->
+            <control>
+                <group>[Channel1]</group>
+                <key>rate_temp_up</key>
+                <status>0x90</status>
+                <midino>0x50</midino>
+                <options><normal/></options>
+            </control>
+            <!-- Note 81 → nudge deck 1 back while pressed -->
+            <control>
+                <group>[Channel1]</group>
+                <key>rate_temp_down</key>
+                <status>0x90</status>
+                <midino>0x51</midino>
+                <options><normal/></options>
+            </control>
+            <!-- Note 82 → nudge deck 2 forward -->
+            <control>
+                <group>[Channel2]</group>
+                <key>rate_temp_up</key>
+                <status>0x90</status>
+                <midino>0x52</midino>
+                <options><normal/></options>
+            </control>
+            <!-- Note 83 → nudge deck 2 back -->
+            <control>
+                <group>[Channel2]</group>
+                <key>rate_temp_down</key>
+                <status>0x90</status>
+                <midino>0x53</midino>
+                <options><normal/></options>
+            </control>
+
         </controls>
         <outputs/>
     </controller>
