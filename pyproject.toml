@@ -9,7 +9,8 @@ authors = [{ name = "Mikka Arumugam", email = "mikka.arumugam@gmail.com" }]
 # Keep dependencies minimal on purpose.
 dependencies = [
   "python-rtmidi>=1.5.8",  # talk to macOS IAC Driver (virtual MIDI)
-  "anthropic>=0.40.0",     # LLM parser
+  "anthropic>=0.40.0",     # kept as fallback path — see deckpilot/core/parser/llm.py docstring
+  "streamlit>=1.30",       # local dashboard frontend (app/dashboard.py)
 ]
 
 [project.optional-dependencies]
