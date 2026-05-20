@@ -1,17 +1,19 @@
 """
 CLI entry point.
 
-For M2 we ship a subcommand-style interface (one subcommand per action):
+Two ways to invoke:
 
+Explicit subcommand mode (deterministic, no API key needed):
     python -m deckpilot play --deck 1
-    python -m deckpilot pause --deck 1
-    python -m deckpilot crossfader --value 0.5
     python -m deckpilot fade --deck 2 --seconds 8
-    python -m deckpilot loop --deck 1
-    python -m deckpilot nudge --deck 1 --direction forward
+    ...
 
-In M3 we'll add a natural-language form (`python -m deckpilot "play deck 1"`)
-that parses the sentence and emits the same DJAction.
+Natural-language mode (parsed via regex + LLM):
+    python -m deckpilot "play deck 1"
+    python -m deckpilot "fade to deck 2 over 8 seconds"
+    python -m deckpilot "kick into the second deck"
+
+The NL form requires ANTHROPIC_API_KEY for anything the regex doesn't cover.
 """
 
 from __future__ import annotations
@@ -32,7 +34,11 @@ from deckpilot.core.actions import (
 from deckpilot.core.executor import Executor
 
 
-def _build_parser() -> argparse.ArgumentParser:
+# Subcommand names — used to decide between explicit mode and NL mode.
+SUBCOMMANDS = {"play", "pause", "crossfader", "fade", "loop", "nudge"}
+
+
+def _build_explicit_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="deckpilot",
         description="Control a DJ deck via virtual MIDI.",
@@ -45,7 +51,7 @@ def _build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("pause", help="pause a deck")
     s.add_argument("--deck", type=int, default=1, choices=[1, 2])
 
-    s = sub.add_parser("crossfader", help="set crossfader position (0.0 = left, 1.0 = right)")
+    s = sub.add_parser("crossfader", help="set crossfader position (0.0=left, 1.0=right)")
     s.add_argument("--value", type=float, required=True)
 
     s = sub.add_parser("fade", help="fade the crossfader to a deck over N seconds")
@@ -54,8 +60,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("loop", help="toggle an 8-beat loop on a deck")
     s.add_argument("--deck", type=int, default=1, choices=[1, 2])
-    s.add_argument("--beats", type=int, default=8,
-                   help="(v0.1 always loops 8 beats regardless of this value)")
+    s.add_argument("--beats", type=int, default=8)
 
     s = sub.add_parser("nudge", help="briefly nudge a deck forward or back")
     s.add_argument("--deck", type=int, default=1, choices=[1, 2])
@@ -65,7 +70,6 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _args_to_action(args: argparse.Namespace) -> DJAction:
-    """Translate parsed CLI args into a DJAction dataclass."""
     if args.action == "play":
         return PlayDeck(deck=args.deck)
     if args.action == "pause":
@@ -81,9 +85,34 @@ def _args_to_action(args: argparse.Namespace) -> DJAction:
     raise ValueError(f"Unhandled action: {args.action!r}")
 
 
+def _resolve_action(argv: list[str]) -> DJAction:
+    """Pick the right entry path: explicit subcommand or NL."""
+    if not argv:
+        # No args at all — show the help for the explicit parser.
+        _build_explicit_parser().parse_args([])  # exits
+        sys.exit(2)
+
+    if argv[0] in SUBCOMMANDS:
+        # Explicit mode.
+        args = _build_explicit_parser().parse_args(argv)
+        return _args_to_action(args)
+
+    # Natural-language mode. Join everything in case the user forgot quotes:
+    #   python -m deckpilot play deck 1   →   "play deck 1"
+    text = " ".join(argv)
+    # Import lazily so the explicit subcommands work even if the anthropic
+    # package isn't installed (e.g. CI for the adapter only).
+    from deckpilot.core.parser import parse, ParseError
+    try:
+        return parse(text)
+    except ParseError as exc:
+        print(f"[deckpilot] could not parse: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+
 def main(argv: list[str] | None = None) -> int:
-    args = _build_parser().parse_args(argv)
-    action = _args_to_action(args)
+    argv = argv if argv is not None else sys.argv[1:]
+    action = _resolve_action(argv)
 
     adapter = MidiAdapter()
     executor = Executor(adapter)
