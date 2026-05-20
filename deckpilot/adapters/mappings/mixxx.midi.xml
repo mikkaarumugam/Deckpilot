@@ -17,16 +17,15 @@ MIDI conventions used here:
   - status 0xB0 = control_change (CC), channel 1
   - midino is the value in hex (e.g. 0x3C = 60 = middle C)
 
-Two binding modes are used:
-  - <normal/>         — Mixxx scales velocity (0..127) to control value (0..1).
-                        Used for the crossfader, loop toggles, and nudges
-                        where velocity-as-value semantics work fine.
-  - <script-binding/> — Calls a JS handler in DeckPilot.midi.js. Used for
-                        play/pause because MIDI "velocity 0" gets dropped as
-                        note_off before <normal/> sees it.
-
 Note numbers map to Python-side action handlers in deckpilot/adapters/midi.py.
 Keep both files in sync — if you change a note here, change it there too.
+
+Binding modes:
+  - <normal/>         — Mixxx scales 0..127 to control value 0..1 (or
+                        triggers if it's a one-shot control).
+  - <script-binding/> — Calls a JS handler in DeckPilot.midi.js. Used for
+                        play/pause because MIDI "velocity 0" gets dropped
+                        as note_off before <normal/> sees it.
 -->
 <MixxxControllerPreset schemaVersion="1" mixxxVersion="2.3.0+">
     <info>
@@ -40,100 +39,215 @@ Keep both files in sync — if you change a note here, change it there too.
         </scriptfiles>
         <controls>
 
-            <!-- ===== Play / Pause (via JS so each intent has its own note) ===== -->
-            <!-- Note 60 → play deck 1 -->
+            <!-- =================================================================== -->
+            <!-- Play / Pause (via JS so each intent has its own note) -->
+            <!-- =================================================================== -->
             <control>
                 <group>[Channel1]</group>
                 <key>DeckPilot.playDeck1</key>
-                <status>0x90</status>
-                <midino>0x3C</midino>
+                <status>0x90</status><midino>0x3C</midino>
                 <options><script-binding/></options>
             </control>
-            <!-- Note 61 → pause deck 1 -->
             <control>
                 <group>[Channel1]</group>
                 <key>DeckPilot.pauseDeck1</key>
-                <status>0x90</status>
-                <midino>0x3D</midino>
+                <status>0x90</status><midino>0x3D</midino>
                 <options><script-binding/></options>
             </control>
-            <!-- Note 62 → play deck 2 -->
             <control>
                 <group>[Channel2]</group>
                 <key>DeckPilot.playDeck2</key>
-                <status>0x90</status>
-                <midino>0x3E</midino>
+                <status>0x90</status><midino>0x3E</midino>
                 <options><script-binding/></options>
             </control>
-            <!-- Note 63 → pause deck 2 -->
             <control>
                 <group>[Channel2]</group>
                 <key>DeckPilot.pauseDeck2</key>
-                <status>0x90</status>
-                <midino>0x3F</midino>
+                <status>0x90</status><midino>0x3F</midino>
                 <options><script-binding/></options>
             </control>
 
-            <!-- ===== Crossfader ===== -->
-            <!-- CC 20 on ch.1 → crossfader position.
-                 Mixxx scales 0..127 to its internal -1..+1 range automatically. -->
+            <!-- =================================================================== -->
+            <!-- Crossfader (CC 20) -->
+            <!-- =================================================================== -->
             <control>
                 <group>[Master]</group>
                 <key>crossfader</key>
-                <status>0xB0</status>
-                <midino>0x14</midino>
+                <status>0xB0</status><midino>0x14</midino>
                 <options><normal/></options>
             </control>
 
-            <!-- ===== Loop (fixed 8 beats for v0.1) ===== -->
-            <!-- Note 70 → toggle 8-beat loop on deck 1 -->
+            <!-- =================================================================== -->
+            <!-- Loop (fixed 8 beats for v0.1) -->
+            <!-- =================================================================== -->
             <control>
                 <group>[Channel1]</group>
                 <key>beatloop_8_toggle</key>
-                <status>0x90</status>
-                <midino>0x46</midino>
+                <status>0x90</status><midino>0x46</midino>
                 <options><normal/></options>
             </control>
-            <!-- Note 71 → toggle 8-beat loop on deck 2 -->
             <control>
                 <group>[Channel2]</group>
                 <key>beatloop_8_toggle</key>
-                <status>0x90</status>
-                <midino>0x47</midino>
+                <status>0x90</status><midino>0x47</midino>
                 <options><normal/></options>
             </control>
 
-            <!-- ===== Nudge (rate_temp_up/down behaves like hold-to-nudge) ===== -->
-            <!-- Note 80 → nudge deck 1 forward while pressed -->
+            <!-- =================================================================== -->
+            <!-- Nudge (rate_temp_up/down — hold-to-nudge button behavior) -->
+            <!-- =================================================================== -->
             <control>
                 <group>[Channel1]</group>
                 <key>rate_temp_up</key>
-                <status>0x90</status>
-                <midino>0x50</midino>
+                <status>0x90</status><midino>0x50</midino>
                 <options><normal/></options>
             </control>
-            <!-- Note 81 → nudge deck 1 back while pressed -->
             <control>
                 <group>[Channel1]</group>
                 <key>rate_temp_down</key>
-                <status>0x90</status>
-                <midino>0x51</midino>
+                <status>0x90</status><midino>0x51</midino>
                 <options><normal/></options>
             </control>
-            <!-- Note 82 → nudge deck 2 forward -->
             <control>
                 <group>[Channel2]</group>
                 <key>rate_temp_up</key>
-                <status>0x90</status>
-                <midino>0x52</midino>
+                <status>0x90</status><midino>0x52</midino>
                 <options><normal/></options>
             </control>
-            <!-- Note 83 → nudge deck 2 back -->
             <control>
                 <group>[Channel2]</group>
                 <key>rate_temp_down</key>
-                <status>0x90</status>
-                <midino>0x53</midino>
+                <status>0x90</status><midino>0x53</midino>
+                <options><normal/></options>
+            </control>
+
+            <!-- =================================================================== -->
+            <!-- Beatsync — one-shot trigger to match BPM + beat alignment -->
+            <!-- =================================================================== -->
+            <control>
+                <group>[Channel1]</group>
+                <key>beatsync</key>
+                <status>0x90</status><midino>0x5A</midino>
+                <options><normal/></options>
+            </control>
+            <control>
+                <group>[Channel2]</group>
+                <key>beatsync</key>
+                <status>0x90</status><midino>0x5B</midino>
+                <options><normal/></options>
+            </control>
+
+            <!-- =================================================================== -->
+            <!-- Hot cues — 8 per deck. Note range 100..107 (deck 1), 108..115 (deck 2). -->
+            <!-- =================================================================== -->
+            <control>
+                <group>[Channel1]</group><key>hotcue_1_activate</key>
+                <status>0x90</status><midino>0x64</midino><options><normal/></options>
+            </control>
+            <control>
+                <group>[Channel1]</group><key>hotcue_2_activate</key>
+                <status>0x90</status><midino>0x65</midino><options><normal/></options>
+            </control>
+            <control>
+                <group>[Channel1]</group><key>hotcue_3_activate</key>
+                <status>0x90</status><midino>0x66</midino><options><normal/></options>
+            </control>
+            <control>
+                <group>[Channel1]</group><key>hotcue_4_activate</key>
+                <status>0x90</status><midino>0x67</midino><options><normal/></options>
+            </control>
+            <control>
+                <group>[Channel1]</group><key>hotcue_5_activate</key>
+                <status>0x90</status><midino>0x68</midino><options><normal/></options>
+            </control>
+            <control>
+                <group>[Channel1]</group><key>hotcue_6_activate</key>
+                <status>0x90</status><midino>0x69</midino><options><normal/></options>
+            </control>
+            <control>
+                <group>[Channel1]</group><key>hotcue_7_activate</key>
+                <status>0x90</status><midino>0x6A</midino><options><normal/></options>
+            </control>
+            <control>
+                <group>[Channel1]</group><key>hotcue_8_activate</key>
+                <status>0x90</status><midino>0x6B</midino><options><normal/></options>
+            </control>
+            <control>
+                <group>[Channel2]</group><key>hotcue_1_activate</key>
+                <status>0x90</status><midino>0x6C</midino><options><normal/></options>
+            </control>
+            <control>
+                <group>[Channel2]</group><key>hotcue_2_activate</key>
+                <status>0x90</status><midino>0x6D</midino><options><normal/></options>
+            </control>
+            <control>
+                <group>[Channel2]</group><key>hotcue_3_activate</key>
+                <status>0x90</status><midino>0x6E</midino><options><normal/></options>
+            </control>
+            <control>
+                <group>[Channel2]</group><key>hotcue_4_activate</key>
+                <status>0x90</status><midino>0x6F</midino><options><normal/></options>
+            </control>
+            <control>
+                <group>[Channel2]</group><key>hotcue_5_activate</key>
+                <status>0x90</status><midino>0x70</midino><options><normal/></options>
+            </control>
+            <control>
+                <group>[Channel2]</group><key>hotcue_6_activate</key>
+                <status>0x90</status><midino>0x71</midino><options><normal/></options>
+            </control>
+            <control>
+                <group>[Channel2]</group><key>hotcue_7_activate</key>
+                <status>0x90</status><midino>0x72</midino><options><normal/></options>
+            </control>
+            <control>
+                <group>[Channel2]</group><key>hotcue_8_activate</key>
+                <status>0x90</status><midino>0x73</midino><options><normal/></options>
+            </control>
+
+            <!-- =================================================================== -->
+            <!-- EQ bands per deck. The group is the EqualizerRack standard form.
+                 parameter1 = low, parameter2 = mid, parameter3 = high.
+                 Mixxx maps CC 0..127 to 0.0..1.0 where 0.0 = full kill, 1.0 = neutral. -->
+            <!-- =================================================================== -->
+            <control>
+                <group>[EqualizerRack1_[Channel1]_Effect1]</group><key>parameter1</key>
+                <status>0xB0</status><midino>0x1E</midino><options><normal/></options>
+            </control>
+            <control>
+                <group>[EqualizerRack1_[Channel1]_Effect1]</group><key>parameter2</key>
+                <status>0xB0</status><midino>0x1F</midino><options><normal/></options>
+            </control>
+            <control>
+                <group>[EqualizerRack1_[Channel1]_Effect1]</group><key>parameter3</key>
+                <status>0xB0</status><midino>0x20</midino><options><normal/></options>
+            </control>
+            <control>
+                <group>[EqualizerRack1_[Channel2]_Effect1]</group><key>parameter1</key>
+                <status>0xB0</status><midino>0x21</midino><options><normal/></options>
+            </control>
+            <control>
+                <group>[EqualizerRack1_[Channel2]_Effect1]</group><key>parameter2</key>
+                <status>0xB0</status><midino>0x22</midino><options><normal/></options>
+            </control>
+            <control>
+                <group>[EqualizerRack1_[Channel2]_Effect1]</group><key>parameter3</key>
+                <status>0xB0</status><midino>0x23</midino><options><normal/></options>
+            </control>
+
+            <!-- =================================================================== -->
+            <!-- Channel volume (CC 40, 41) -->
+            <!-- =================================================================== -->
+            <control>
+                <group>[Channel1]</group>
+                <key>volume</key>
+                <status>0xB0</status><midino>0x28</midino>
+                <options><normal/></options>
+            </control>
+            <control>
+                <group>[Channel2]</group>
+                <key>volume</key>
+                <status>0xB0</status><midino>0x29</midino>
                 <options><normal/></options>
             </control>
 

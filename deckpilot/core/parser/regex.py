@@ -2,16 +2,15 @@
 Rule-based parser. Catches the most common command phrasings without needing
 an LLM round-trip.
 
-Coverage is intentionally narrow — we only match phrasings that are
-unambiguous and high-frequency. Everything else returns None and the facade
-falls back to the LLM.
+Each rule matches a single phrasing and produces a 1-step ActionPlan. For
+multi-step commands (e.g. "bass swap"), the regex returns None and the
+facade falls back to the LLM, which can plan multi-step sequences.
 
 Adding a new rule:
-    1. Write a regex. Use named groups for clarity.
-    2. Append (compiled_pattern, factory) to RULES.
+    1. Write a regex. Use named groups.
+    2. Append (pattern, factory) to RULES. Factory takes the match and
+       returns a DJAction; the parser wraps it in an ActionPlan automatically.
     3. Add a test case in tests/test_parser.py.
-
-Keep these LOWERCASE — the facade lowercases text before matching.
 """
 
 from __future__ import annotations
@@ -20,6 +19,7 @@ import re
 from typing import Callable
 
 from deckpilot.core.actions import (
+    ActionPlan,
     DJAction,
     FadeToDeck,
     LoopDeck,
@@ -30,7 +30,6 @@ from deckpilot.core.actions import (
 )
 
 
-# Each rule = (pattern, factory). factory takes the match and returns a DJAction.
 RULES: list[tuple[re.Pattern[str], Callable[[re.Match[str]], DJAction]]] = [
 
     # "play deck 1" / "start deck 2"
@@ -62,13 +61,13 @@ RULES: list[tuple[re.Pattern[str], Callable[[re.Match[str]], DJAction]]] = [
         lambda m: LoopDeck(deck=int(m["deck"]), beats=int(m["beats"])),
     ),
 
-    # "crossfader to the middle" / "crossfader middle"
+    # "crossfader to the middle"
     (
         re.compile(r"^crossfader\s+(?:to\s+)?(?:the\s+)?(?:middle|center)\s*$"),
         lambda m: SetCrossfader(value=0.5),
     ),
 
-    # "nudge deck 1 forward" / "nudge deck 2 back"
+    # "nudge deck 1 forward"
     (
         re.compile(
             r"^nudge\s+deck\s+(?P<deck>[12])"
@@ -82,11 +81,11 @@ RULES: list[tuple[re.Pattern[str], Callable[[re.Match[str]], DJAction]]] = [
 ]
 
 
-def parse(text: str) -> DJAction | None:
-    """Return a DJAction if any rule matches, otherwise None."""
+def parse(text: str) -> ActionPlan | None:
+    """Return a 1-step ActionPlan if a rule matches, else None."""
     normalized = text.strip().lower()
     for pattern, factory in RULES:
         match = pattern.match(normalized)
         if match is not None:
-            return factory(match)
+            return ActionPlan.single(factory(match))
     return None

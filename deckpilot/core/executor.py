@@ -1,65 +1,108 @@
 """
-Executor — runs DJActions against an Adapter.
+Executor — runs an ActionPlan against an Adapter.
 
-For atomic actions (Play, Pause, SetCrossfader, Loop, Nudge) the Executor
-just hands them straight to the adapter. The interesting case is the
-composite/time-based action: FadeToDeck. The executor expands it into a
-stream of SetCrossfader calls spaced over the requested duration.
+Two responsibilities:
+1. Expand any composite/time-based actions (FadeToDeck) into atomic steps
+   that the adapter can dispatch directly.
+2. Walk the resulting timeline, sleeping between events so each step
+   fires at the right wall-clock moment.
 
-Why this separation:
-- The adapter only knows how to send one MIDI primitive at a time. It doesn't
-  loop, sleep, or know that a "fade" is multiple crossfader moves.
-- Adding a new time-based action later (e.g. "ramp tempo to X over Y beats")
-  goes here, not in the adapter. The adapter stays small.
+The clever bit: after expansion, the executor holds a flat list of
+(time, action) pairs sorted by time. It just walks that list. This
+handles parallel composition (a fade can overlap with an EQ tweak)
+without threading — both events sit in the same timeline.
 """
 
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 
 from deckpilot.adapters.base import Adapter
-from deckpilot.core.actions import DJAction, FadeToDeck, SetCrossfader
+from deckpilot.core.actions import (
+    ActionPlan,
+    DJAction,
+    FadeToDeck,
+    SetCrossfader,
+    TimedAction,
+)
 
 
 # Frame rate for time-based interpolations. 30 updates per second is plenty
-# smooth for crossfader fades and keeps the MIDI traffic light.
+# smooth for crossfader fades and keeps MIDI traffic light.
 FADE_FPS = 30
 
 
+@dataclass(frozen=True)
+class _AtomicEvent:
+    """An atomic action scheduled at an absolute wall-clock offset."""
+    at_seconds: float
+    action: DJAction  # guaranteed atomic (no FadeToDeck) after expansion
+
+
 class Executor:
-    """Runs DJActions through an Adapter, expanding composite actions as needed."""
+    """Runs ActionPlans through an Adapter, expanding composite steps as needed."""
 
     def __init__(self, adapter: Adapter) -> None:
         self._adapter = adapter
 
+    # --- public API ---
+
     def run(self, action: DJAction) -> None:
-        if isinstance(action, FadeToDeck):
-            self._run_fade(action)
-        else:
-            # Everything else is atomic — pass straight through.
-            self._adapter.dispatch(action)
+        """Run a single action by wrapping it in a 1-step plan. Convenience for tests/CLI."""
+        self.run_plan(ActionPlan.single(action))
 
-    def _run_fade(self, action: FadeToDeck) -> None:
+    def run_plan(self, plan: ActionPlan) -> None:
+        """Expand the plan into a flat timeline and walk it in real time."""
+        timeline = self._expand(plan)
+        if not timeline:
+            return
+
+        start_monotonic = time.monotonic()
+        for event in timeline:
+            target = start_monotonic + event.at_seconds
+            wait = target - time.monotonic()
+            if wait > 0:
+                time.sleep(wait)
+            self._adapter.dispatch(event.action)
+
+    # --- expansion ---
+
+    def _expand(self, plan: ActionPlan) -> list[_AtomicEvent]:
+        """Replace each FadeToDeck with its constituent SetCrossfader stream."""
+        events: list[_AtomicEvent] = []
+        for step in plan.steps:
+            if isinstance(step.action, FadeToDeck):
+                events.extend(self._expand_fade(step))
+            else:
+                events.append(_AtomicEvent(at_seconds=step.at_seconds, action=step.action))
+        # Stable sort by time so simultaneous events keep their declared order.
+        events.sort(key=lambda e: e.at_seconds)
+        return events
+
+    def _expand_fade(self, step: TimedAction) -> list[_AtomicEvent]:
         """
-        Smoothly slide the crossfader to the target deck over `seconds`.
+        Turn one FadeToDeck step into ~30 fps worth of SetCrossfader events,
+        each timestamped at `step.at_seconds + offset_within_fade`.
 
-        Assumes the crossfader starts at the OPPOSITE end (i.e. if you're
-        fading to deck 2, the crossfader is currently fully on deck 1).
-        We don't read Mixxx's state back, so this is a simplifying assumption
-        — fine for the demo, would need state read-back for production.
+        Assumes the crossfader starts at the opposite end. We don't read Mixxx
+        state back — a simplifying assumption that's fine for the demo and
+        easy to fix later by querying via MIDI feedback.
         """
-        start = 1.0 if action.deck == 1 else 0.0  # opposite end
-        end = 0.0 if action.deck == 1 else 1.0    # target end
+        fade = step.action
+        assert isinstance(fade, FadeToDeck)
 
-        # How many crossfader updates we'll send. At minimum 1 so we always
-        # land on the target value.
-        total_steps = max(int(action.seconds * FADE_FPS), 1)
-        interval = action.seconds / total_steps
+        start_value = 1.0 if fade.deck == 1 else 0.0
+        end_value = 0.0 if fade.deck == 1 else 1.0
+        total_steps = max(int(fade.seconds * FADE_FPS), 1)
+        interval = fade.seconds / total_steps
 
-        for step in range(total_steps + 1):
-            progress = step / total_steps  # 0.0 → 1.0
-            value = start + (end - start) * progress
-            self._adapter.dispatch(SetCrossfader(value=value))
-            # Don't sleep after the final move — we're done.
-            if step < total_steps:
-                time.sleep(interval)
+        events: list[_AtomicEvent] = []
+        for i in range(total_steps + 1):
+            progress = i / total_steps
+            value = start_value + (end_value - start_value) * progress
+            events.append(_AtomicEvent(
+                at_seconds=step.at_seconds + i * interval,
+                action=SetCrossfader(value=value),
+            ))
+        return events

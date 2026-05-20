@@ -1,16 +1,14 @@
 """
-MidiAdapter — turns DJActions into MIDI messages and ships them through a
-virtual MIDI port (the macOS IAC Driver). The receiving DJ software (Mixxx
-in our setup) has been told which MIDI note means what by the mapping file
-at adapters/mappings/mixxx.midi.xml.
+MidiAdapter — turns atomic DJActions into MIDI messages and ships them
+through a virtual MIDI port (the macOS IAC Driver). Mixxx interprets the
+incoming MIDI via the mapping in adapters/mappings/mixxx.midi.xml.
 
-Design:
-- The adapter only handles ATOMIC actions — one DJAction → one MIDI message
-  (or a brief on/off pair for nudge). Time-based actions like FadeToDeck are
-  decomposed into a stream of atomic actions by the Executor (see
-  core/executor.py).
-- The note/CC numbers live in module-level constants below. They MUST match
-  the numbers in the Mixxx mapping XML. If you change one, change the other.
+Composite/time-based actions (FadeToDeck) are handled by the Executor,
+which expands them into a stream of atomic SetCrossfader calls dispatched
+through this adapter.
+
+The note/CC numbers live in module-level constants below. They MUST match
+the numbers in the Mixxx mapping XML. If you change one, change the other.
 """
 
 from __future__ import annotations
@@ -22,11 +20,15 @@ import rtmidi
 from deckpilot.adapters.base import Adapter
 from deckpilot.core.actions import (
     DJAction,
+    HotCue,
     LoopDeck,
     NudgeDeck,
     PauseDeck,
     PlayDeck,
     SetCrossfader,
+    SetEQ,
+    SetVolume,
+    Sync,
 )
 
 
@@ -36,23 +38,47 @@ NOTE_OFF = 0x80
 CONTROL_CHANGE = 0xB0
 
 
-# --- Note/CC numbers — keep in sync with mixxx.midi.xml ---
-# Play and pause have separate notes (60/62 = play, 61/63 = pause) so each
-# intent maps to a unique MIDI message — see mixxx.midi.js for why.
-PLAY_NOTES = {1: 0x3C, 2: 0x3E}
-PAUSE_NOTES = {1: 0x3D, 2: 0x3F}
-CROSSFADER_CC = 0x14                            # CC 20
-LOOP_NOTES = {1: 0x46, 2: 0x47}                 # toggle 8-beat loop
+# --- Note / CC numbers — keep in sync with mixxx.midi.xml ---
+
+# Play/pause (script bindings in Mixxx — separate notes for each intent).
+PLAY_NOTES = {1: 0x3C, 2: 0x3E}     # 60, 62
+PAUSE_NOTES = {1: 0x3D, 2: 0x3F}    # 61, 63
+
+# Crossfader (CC 20).
+CROSSFADER_CC = 0x14
+
+# Loop toggles (8 beats only in v0.1).
+LOOP_NOTES = {1: 0x46, 2: 0x47}     # 70, 71
+
+# Nudge (rate_temp_up/down — held while button is down).
 NUDGE_NOTES = {
-    (1, "forward"): 0x50,
-    (1, "back"): 0x51,
-    (2, "forward"): 0x52,
-    (2, "back"): 0x53,
+    (1, "forward"): 0x50,           # 80
+    (1, "back"): 0x51,              # 81
+    (2, "forward"): 0x52,           # 82
+    (2, "back"): 0x53,              # 83
+}
+NUDGE_HOLD_SECONDS = 0.1
+
+# Beatsync (one-shot trigger).
+SYNC_NOTES = {1: 0x5A, 2: 0x5B}     # 90, 91
+
+# Hot cues — 8 cues × 2 decks. Notes 100..107 (deck 1), 108..115 (deck 2).
+def _hotcue_note(deck: int, cue: int) -> int:
+    base = 0x64 if deck == 1 else 0x6C  # 100 or 108
+    return base + (cue - 1)
+
+# EQ bands per deck (CC 30..35).
+EQ_CC = {
+    (1, "low"):  0x1E,              # 30
+    (1, "mid"):  0x1F,              # 31
+    (1, "high"): 0x20,              # 32
+    (2, "low"):  0x21,              # 33
+    (2, "mid"):  0x22,              # 34
+    (2, "high"): 0x23,              # 35
 }
 
-# How long to "hold" a nudge button before releasing it.
-# Mixxx's rate_temp_up nudges while held — 100ms feels like a quick tap.
-NUDGE_HOLD_SECONDS = 0.1
+# Channel volume (CC 40, 41).
+VOLUME_CC = {1: 0x28, 2: 0x29}
 
 DEFAULT_PORT_NAME = "IAC Driver Bus 1"
 
@@ -81,37 +107,45 @@ class MidiAdapter(Adapter):
     def dispatch(self, action: DJAction) -> None:
         """Execute one atomic action by sending the corresponding MIDI message(s)."""
         if isinstance(action, PlayDeck):
-            # Hits DeckPilot.playDeck{N} in mixxx.midi.js, which sets play=1.
             self._note_on(PLAY_NOTES[action.deck], velocity=127)
 
         elif isinstance(action, PauseDeck):
-            # Hits DeckPilot.pauseDeck{N} in mixxx.midi.js, which sets play=0.
             self._note_on(PAUSE_NOTES[action.deck], velocity=127)
 
         elif isinstance(action, SetCrossfader):
-            # Clamp to [0, 1] then scale to [0, 127] for MIDI CC.
             clamped = max(0.0, min(1.0, action.value))
             self._cc(CROSSFADER_CC, round(clamped * 127))
 
         elif isinstance(action, LoopDeck):
-            # Toggle an 8-beat loop. Variable beat counts are TODO — would
-            # require a second binding for `beatloop_size` and dispatching
-            # both CC + note here.
             self._note_on(LOOP_NOTES[action.deck], velocity=127)
 
         elif isinstance(action, NudgeDeck):
-            # Mixxx's rate_temp_up/down is a "while held" button.
-            # Tap = press, brief wait, release.
             note = NUDGE_NOTES[(action.deck, action.direction)]
             self._note_on(note, velocity=127)
             time.sleep(NUDGE_HOLD_SECONDS)
             self._note_off(note)
 
+        elif isinstance(action, SetEQ):
+            clamped = max(0.0, min(1.0, action.value))
+            self._cc(EQ_CC[(action.deck, action.band)], round(clamped * 127))
+
+        elif isinstance(action, SetVolume):
+            clamped = max(0.0, min(1.0, action.value))
+            self._cc(VOLUME_CC[action.deck], round(clamped * 127))
+
+        elif isinstance(action, HotCue):
+            if not (1 <= action.cue <= 8):
+                raise ValueError(f"hot cue must be 1..8, got {action.cue}")
+            self._note_on(_hotcue_note(action.deck, action.cue), velocity=127)
+
+        elif isinstance(action, Sync):
+            self._note_on(SYNC_NOTES[action.deck], velocity=127)
+
         else:
-            # FadeToDeck is composite — should be handled by the Executor, not here.
+            # FadeToDeck is composite — handled by the Executor, not here.
             raise ValueError(
                 f"MidiAdapter received non-atomic action: {action!r}. "
-                "Use Executor.run() to dispatch composite actions like FadeToDeck."
+                "Use Executor.run_plan() for composite actions like FadeToDeck."
             )
 
     # --- low-level MIDI helpers ---
@@ -120,12 +154,6 @@ class MidiAdapter(Adapter):
         self._midi_out.send_message([NOTE_ON, note, velocity])
 
     def _note_off(self, note: int) -> None:
-        # We send "note_on with velocity 0" rather than an explicit 0x80
-        # note_off. Reason: Mixxx's <normal/> bindings are tied to a specific
-        # status byte. Our mapping uses 0x90 (note_on), so we have to keep
-        # using 0x90 — velocity 0 still gets read as "control value = 0",
-        # which Mixxx's `play` setter interprets as "pause."
-        # Both forms are valid per the MIDI spec; this one matches our binding.
         self._midi_out.send_message([NOTE_ON, note, 0])
 
     def _cc(self, controller: int, value: int) -> None:

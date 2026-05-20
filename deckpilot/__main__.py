@@ -10,10 +10,12 @@ Explicit subcommand mode (deterministic, no API key needed):
 
 Natural-language mode (parsed via regex + LLM):
     python -m deckpilot "play deck 1"
-    python -m deckpilot "fade to deck 2 over 8 seconds"
+    python -m deckpilot "bass swap into deck 2"
     python -m deckpilot "kick into the second deck"
 
-The NL form requires ANTHROPIC_API_KEY for anything the regex doesn't cover.
+The NL form uses the regex fast-path for canonical phrasings and falls
+back to Claude (via `claude -p`) for paraphrases and multi-step plans
+like the bass swap.
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ import sys
 
 from deckpilot.adapters.midi import MidiAdapter
 from deckpilot.core.actions import (
+    ActionPlan,
     DJAction,
     FadeToDeck,
     LoopDeck,
@@ -34,7 +37,6 @@ from deckpilot.core.actions import (
 from deckpilot.core.executor import Executor
 
 
-# Subcommand names — used to decide between explicit mode and NL mode.
 SUBCOMMANDS = {"play", "pause", "crossfader", "fade", "loop", "nudge"}
 
 
@@ -45,24 +47,16 @@ def _build_explicit_parser() -> argparse.ArgumentParser:
     )
     sub = p.add_subparsers(dest="action", required=True)
 
-    s = sub.add_parser("play", help="start playback on a deck")
-    s.add_argument("--deck", type=int, default=1, choices=[1, 2])
-
-    s = sub.add_parser("pause", help="pause a deck")
-    s.add_argument("--deck", type=int, default=1, choices=[1, 2])
-
-    s = sub.add_parser("crossfader", help="set crossfader position (0.0=left, 1.0=right)")
-    s.add_argument("--value", type=float, required=True)
-
-    s = sub.add_parser("fade", help="fade the crossfader to a deck over N seconds")
+    s = sub.add_parser("play");       s.add_argument("--deck", type=int, default=1, choices=[1, 2])
+    s = sub.add_parser("pause");      s.add_argument("--deck", type=int, default=1, choices=[1, 2])
+    s = sub.add_parser("crossfader"); s.add_argument("--value", type=float, required=True)
+    s = sub.add_parser("fade")
     s.add_argument("--deck", type=int, default=2, choices=[1, 2])
     s.add_argument("--seconds", type=float, default=8.0)
-
-    s = sub.add_parser("loop", help="toggle an 8-beat loop on a deck")
+    s = sub.add_parser("loop")
     s.add_argument("--deck", type=int, default=1, choices=[1, 2])
     s.add_argument("--beats", type=int, default=8)
-
-    s = sub.add_parser("nudge", help="briefly nudge a deck forward or back")
+    s = sub.add_parser("nudge")
     s.add_argument("--deck", type=int, default=1, choices=[1, 2])
     s.add_argument("--direction", choices=["forward", "back"], default="forward")
 
@@ -70,38 +64,26 @@ def _build_explicit_parser() -> argparse.ArgumentParser:
 
 
 def _args_to_action(args: argparse.Namespace) -> DJAction:
-    if args.action == "play":
-        return PlayDeck(deck=args.deck)
-    if args.action == "pause":
-        return PauseDeck(deck=args.deck)
-    if args.action == "crossfader":
-        return SetCrossfader(value=args.value)
-    if args.action == "fade":
-        return FadeToDeck(deck=args.deck, seconds=args.seconds)
-    if args.action == "loop":
-        return LoopDeck(deck=args.deck, beats=args.beats)
-    if args.action == "nudge":
-        return NudgeDeck(deck=args.deck, direction=args.direction)
+    if args.action == "play":       return PlayDeck(deck=args.deck)
+    if args.action == "pause":      return PauseDeck(deck=args.deck)
+    if args.action == "crossfader": return SetCrossfader(value=args.value)
+    if args.action == "fade":       return FadeToDeck(deck=args.deck, seconds=args.seconds)
+    if args.action == "loop":       return LoopDeck(deck=args.deck, beats=args.beats)
+    if args.action == "nudge":      return NudgeDeck(deck=args.deck, direction=args.direction)
     raise ValueError(f"Unhandled action: {args.action!r}")
 
 
-def _resolve_action(argv: list[str]) -> DJAction:
-    """Pick the right entry path: explicit subcommand or NL."""
+def _resolve_plan(argv: list[str]) -> ActionPlan:
     if not argv:
-        # No args at all — show the help for the explicit parser.
-        _build_explicit_parser().parse_args([])  # exits
+        _build_explicit_parser().parse_args([])  # exits with help
         sys.exit(2)
 
     if argv[0] in SUBCOMMANDS:
-        # Explicit mode.
         args = _build_explicit_parser().parse_args(argv)
-        return _args_to_action(args)
+        return ActionPlan.single(_args_to_action(args))
 
-    # Natural-language mode. Join everything in case the user forgot quotes:
-    #   python -m deckpilot play deck 1   →   "play deck 1"
+    # Natural-language mode.
     text = " ".join(argv)
-    # Import lazily so the explicit subcommands work even if the anthropic
-    # package isn't installed (e.g. CI for the adapter only).
     from deckpilot.core.parser import parse, ParseError
     try:
         return parse(text)
@@ -110,15 +92,26 @@ def _resolve_action(argv: list[str]) -> DJAction:
         sys.exit(1)
 
 
+def _print_plan(plan: ActionPlan) -> None:
+    if len(plan.steps) == 1 and plan.steps[0].at_seconds == 0:
+        # Single immediate action — keep the log line concise.
+        print(f"[deckpilot] → {plan.steps[0].action}")
+        return
+
+    print(f"[deckpilot] → plan with {len(plan.steps)} steps:")
+    for step in plan.steps:
+        print(f"    t={step.at_seconds:5.2f}s  {step.action}")
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
-    action = _resolve_action(argv)
+    plan = _resolve_plan(argv)
 
     adapter = MidiAdapter()
     executor = Executor(adapter)
 
-    print(f"[deckpilot] → {action}")
-    executor.run(action)
+    _print_plan(plan)
+    executor.run_plan(plan)
     print("[deckpilot] done")
     return 0
 
