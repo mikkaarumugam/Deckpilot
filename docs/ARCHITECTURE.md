@@ -3,60 +3,185 @@
 ## The pipeline
 
 ```
-   CLI text  ──▶  parser  ──▶  DJAction  ──▶  MidiAdapter  ──▶  IAC  ──▶  VirtualDJ
-                 (LLM +                       (mapping.json)
-                  regex)
+   text  ──▶  parser ──▶ ActionPlan ──▶ executor ──▶ MidiAdapter ──▶ IAC ──▶ Mixxx
+          (regex|LLM)                 (timeline)    (note/CC table)
+
+                                            │
+                                            ▼
+                                       Mixxx XML maps
+                                        notes/CC →
+                                       Mixxx controls
 ```
 
-Four moving parts:
+Six moving parts:
 
-1. **CLI** — collects the user's English command.
-2. **Parser** — turns English into a structured `DJAction`. Two implementations:
-   - Regex parser for the 3–4 most common phrasings. Fast, free, deterministic.
-   - LLM parser (Claude Haiku) for everything else. Slower (~1–3s) but flexible.
-3. **`DJAction`** — a frozen dataclass with one field per parameter (e.g. `FadeToDeck(deck=2, seconds=8.0)`). This is the **contract** between parsing and execution.
-4. **Adapter** — turns a `DJAction` into MIDI events sent through macOS's IAC Driver into VirtualDJ. VirtualDJ has been MIDI-Learned to respond to specific notes and CCs (see `adapters/mappings/virtualdj.json`).
+1. **Text input** — CLI argument, dashboard text box, or WhisperType
+   dictation. Becomes a single string.
+2. **Parser** — turns the string into an `ActionPlan` (one or more
+   timed atomic actions). Two backends: regex (fast, deterministic) and
+   LLM (paraphrase + multi-step composition).
+3. **ActionPlan** — `tuple[TimedAction]` where each TimedAction wraps
+   a DJAction with an `at_seconds` offset from plan start.
+4. **Executor** — walks the plan. Expands composite actions
+   (FadeToDeck → series of SetCrossfader CCs). Sorts the resulting
+   timeline by time and dispatches each atomic action at its scheduled
+   moment via `time.sleep`.
+5. **MidiAdapter** — turns atomic actions into MIDI messages and
+   ships them through the IAC Driver port. Each atomic action type
+   maps to a fixed note or CC, defined in `midi.py` constants.
+6. **Mixxx XML mapping** — Mixxx loads this from its controllers
+   folder. Maps incoming MIDI (status + note/CC number) to Mixxx
+   controls (`engine.setValue` calls).
 
 ## Why this shape
 
-### Why a structured action schema instead of "let the LLM run the show"?
+### Structured intent, not raw control
 
-An LLM that emits raw MIDI bytes would be (a) impossible to test, (b) impossible to safely constrain, and (c) impossible to swap for a different DJ app. By forcing the LLM to emit one of 6 well-defined actions:
+We *deliberately* don't let the LLM emit raw MIDI. It emits one of N
+typed actions; the deterministic Python layer translates an action to
+MIDI. This gives us:
 
-- **Tests don't need VirtualDJ running.** The parser can be evaluated in isolation.
-- **The LLM can't ask for unsupported things.** If it tries to invent `set_master_volume`, we reject it.
-- **The action layer is portable.** Swapping VirtualDJ for Mixxx is "write a new adapter," not "rewrite the LLM prompt."
+- **Testability** — the parser can be unit-tested without Mixxx running.
+- **Safety** — the LLM can't ask for something we don't support; the
+  validator in `llm.py:_payload_to_action` rejects out-of-vocabulary
+  shapes.
+- **Portability** — swapping DJ software = new adapter mapping, nothing
+  else changes. We validated this once (VirtualDJ → Mixxx pivot in an
+  hour).
 
-This pattern — *LLM produces structured intent, deterministic code executes it* — is the dominant architecture for production AI products. See: function calling, tool use, agent action spaces.
+### Two-tier parsing
 
-### Why regex AND LLM, not just LLM?
+Regex catches the head of the distribution (predictable phrasings),
+LLM catches the tail (paraphrases + composition). Trade-off summary:
 
-- The 5 most-common commands (play, pause, basic fade) make up ~70% of usage.
-- A regex matches them in microseconds. Claude takes 1–3 seconds.
-- The user experience of "play deck 1" should be instant. Regex catches it.
-- For everything else (paraphrases, multi-action commands, unusual phrasings), the LLM is the safety net.
+| | Regex | LLM (Haiku via claude -p) |
+|---|---|---|
+| Latency | <1ms | ~700-1500ms |
+| Cost | Free | Free (subscription); metered if SDK |
+| Determinism | 100% | Probabilistic |
+| Coverage | Whatever rules you wrote | Everything the model understands |
+| Composition | Single action only | Multi-step plans |
 
-### Why an adapter layer?
+When in doubt: **add a regex rule** for new common phrasings rather
+than upgrading the LLM. See D-005 / `b39d6d6`.
 
-The action schema is the same regardless of DJ software. The MIDI mapping is not. Today: VirtualDJ. Tomorrow: Mixxx, Serato, hardware controllers. Each is a new adapter implementing `dispatch(action)`. Nothing else moves.
+### Plan-as-timeline (not as a sequence)
 
-## The 6 actions (v0.1)
+Multi-step actions like "bass swap" have parallel timing — a fade can
+overlap with an EQ cut at the fade midpoint. The executor handles this
+by expanding all composite steps into atomic events first, sorting by
+time, then walking the flat timeline. **No threading.** Single-threaded
+deterministic walk, easy to reason about.
 
-See `deckpilot/core/actions.py` for the source of truth. Summary:
+This is also the substrate for the future agent layer: anything that
+emits an ActionPlan goes through the same executor.
 
-| Action            | Fields                       | What it does                                      |
-|-------------------|------------------------------|---------------------------------------------------|
-| `PlayDeck`        | `deck: int`                  | Start playback on deck N.                         |
-| `PauseDeck`       | `deck: int`                  | Pause deck N.                                     |
-| `SetCrossfader`   | `value: float (0.0–1.0)`     | Set crossfader position.                          |
-| `FadeToDeck`      | `deck: int, seconds: float`  | Interpolate crossfader to deck N over M seconds.  |
-| `LoopDeck`        | `deck: int, beats: int`      | Trigger an N-beat loop on deck N.                 |
-| `NudgeDeck`       | `deck: int, direction`       | Small tempo nudge forward/back.                   |
+## The action vocabulary (10 atomic types)
 
-## What's intentionally absent
+Defined in `core/actions.py`. Each is a frozen dataclass.
 
-- **No state read-back.** We don't ask VirtualDJ what BPM is playing. The action layer is fire-and-forget. State-aware actions ("loop the next 8 beats *from now*") would need the VirtualDJ Pro HTTP API.
-- **No multi-action plans.** The LLM emits one action per call. "Do a bass-swap transition" would need a planner that produces an ordered list of actions.
-- **No undo.** Real DJs would demand it; v0.1 doesn't have it.
+| Action | Fields | What it does |
+|---|---|---|
+| `PlayDeck` | `deck: int` | Start playback on deck N |
+| `PauseDeck` | `deck: int` | Pause deck N |
+| `SetCrossfader` | `value: float 0..1` | Absolute crossfader position |
+| `FadeToDeck` | `deck: int, seconds: float` | Composite: interpolated crossfader |
+| `LoopDeck` | `deck: int, beats: int` | Toggle an 8-beat loop (beats currently ignored in mapping) |
+| `NudgeDeck` | `deck: int, direction: 'forward'\|'back'` | Tap nudge-rate button |
+| `SetEQ` | `deck: int, band: 'low'\|'mid'\|'high', value: float 0..1` | Set one EQ band |
+| `SetVolume` | `deck: int, value: float 0..1` | Channel fader |
+| `HotCue` | `deck: int, cue: int 1..8` | Jump to (or set) a hot cue |
+| `Sync` | `deck: int` | Mixxx beatsync trigger |
 
-All three are listed in the README's "What's next."
+`FadeToDeck` is the only composite. Everything else is atomic.
+
+## The plan layer
+
+```python
+@dataclass(frozen=True)
+class TimedAction:
+    action: DJAction         # any atomic OR FadeToDeck
+    at_seconds: float = 0.0  # absolute time from plan start
+
+@dataclass(frozen=True)
+class ActionPlan:
+    steps: tuple[TimedAction, ...]
+```
+
+The parser always returns an `ActionPlan`. Single-action commands get
+wrapped via `ActionPlan.single(action)`. Multi-step plans like bass
+swap have multiple TimedActions with different `at_seconds`.
+
+## The executor walk
+
+```python
+def run_plan(self, plan):
+    timeline = self._expand(plan)        # FadeToDeck → SetCrossfader stream
+    start = time.monotonic()
+    for event in timeline:               # sorted by at_seconds
+        wait = (start + event.at_seconds) - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+        self._adapter.dispatch(event.action)
+```
+
+The expansion for a 4-second FadeToDeck at `at_seconds=0` produces ~120
+SetCrossfader events at 30 fps, each with its own `at_seconds` offset.
+A SetEQ scheduled at `at_seconds=2` lands cleanly in the middle of the
+expanded fade stream — no threading, no coordination.
+
+## MIDI side
+
+`MidiAdapter.dispatch(action)` translates one atomic action to one or
+two MIDI messages. The note/CC numbers are module-level constants in
+`midi.py` and MUST match `adapters/mappings/mixxx.midi.xml`.
+
+Most actions = one note_on with velocity 127. Exceptions:
+
+- `SetCrossfader`, `SetEQ`, `SetVolume` → CC with value (CC controller
+  + scaled 0-127 value).
+- `NudgeDeck` → note_on, 100ms sleep, note_off. (Mixxx's
+  `rate_temp_up/down` is a hold-to-nudge button.)
+- `PauseDeck` uses a DIFFERENT NOTE from `PlayDeck` (61 vs 60) routed
+  through JS script bindings in Mixxx (see D-004 / GOTCHAS § velocity
+  zero).
+
+## Mixxx-side mapping
+
+`mixxx.midi.xml` is loaded by Mixxx and tells it what to do when MIDI
+arrives. Two binding modes used:
+
+- `<normal/>` — Mixxx scales 0..127 to control value 0..1. Used for
+  CCs (crossfader, EQ, volume) and one-shot note triggers (loops, hot
+  cues, sync, nudge).
+- `<script-binding/>` — Calls a JS handler in `mixxx.midi.js`. Used
+  for play/pause (the velocity-zero gotcha).
+
+## Frontend layers
+
+Two interfaces share the parser + executor:
+
+- **CLI** (`deckpilot/__main__.py`) — argparse subcommands for
+  explicit mode, plus a single-string NL form. Single-shot — opens
+  MIDI port, executes, closes.
+- **Dashboard** (`app/dashboard.py`) — Streamlit. Long-lived; caches
+  the `MidiAdapter` in `st.session_state`. Adds: plan visualization,
+  history with undo, queue, clear history, reset Mixxx.
+
+Both go through the same parser facade and executor, so they always
+behave the same with respect to action semantics.
+
+## Future: agent layer (parked)
+
+The architecture is designed to receive an agentic upgrade without a
+refactor. An agent would:
+
+1. Read Mixxx state (BPM, deck positions, currently playing) via MIDI
+   feedback or HTTP API.
+2. Plan multi-step transitions in musical time ("at the next 16-beat
+   downbeat, start a 4-beat fade").
+3. Emit an `ActionPlan` — same dataclass we use today.
+4. The executor runs it the same way.
+
+The only new code is the planning agent itself + a state-read-back
+module. Everything else stays.
