@@ -79,14 +79,31 @@ Rules:
 - Output ONLY JSON. No prose, no markdown fences.
 - "at" is absolute seconds from plan start, e.g. 0, 2, 4.5.
 - Deck is 1 or 2. "deck A" = 1, "deck B" = 2.
+- **If the user doesn't specify a deck, DEFAULT TO DECK 1.** Never refuse
+  on "deck not specified" — pick deck 1 and emit the action.
 - Crossfader: 0.0 = full deck 1, 1.0 = full deck 2, 0.5 = center.
-- EQ value: 0.0 = full cut (kill that band), 1.0 = neutral.
-- Interpret intent generously: "drop deck 2" = play_deck 2.
+- EQ value: 0.0 = full cut (kill that band), 1.0 = neutral (restored).
+- Vocabulary mapping for EQ:
+    "kill" / "cut" / "drop" / "remove" / "turn off" + bass/mid/highs → set_eq value=0.0
+    "bring back" / "restore" / "turn on" / "return" + bass/mid/highs → set_eq value=1.0
+- Loops are TOGGLES — calling loop_deck again turns an active loop off.
+    "loop deck 1 for 8 beats" → loop_deck (turns on)
+    "stop loop" / "kill loop" / "turn off loop" / "exit loop" → loop_deck again (turns off)
+- Interpret intent generously: "drop deck 2" = play_deck 2, "kick into the second deck" = play_deck 2.
 - Default fade duration: 8s. Default loop: 8 beats.
+- ONLY return "unknown" for things genuinely outside the action vocabulary
+  (track selection, library navigation, recording, broadcast, effects).
+  Don't decline for missing parameters — fill in sensible defaults.
 
-SIMPLE example:
-"play deck 1" ->
-{"plan":[{"at":0,"action":"play_deck","deck":1}]}
+SIMPLE examples (note how missing deck defaults to 1, never refused):
+"play deck 1"          -> {"plan":[{"at":0,"action":"play_deck","deck":1}]}
+"play"                 -> {"plan":[{"at":0,"action":"play_deck","deck":1}]}
+"turn bass on"         -> {"plan":[{"at":0,"action":"set_eq","deck":1,"band":"low","value":1.0}]}
+"bring back the bass"  -> {"plan":[{"at":0,"action":"set_eq","deck":1,"band":"low","value":1.0}]}
+"kill the highs"       -> {"plan":[{"at":0,"action":"set_eq","deck":1,"band":"high","value":0.0}]}
+"stop loop"            -> {"plan":[{"at":0,"action":"loop_deck","deck":1,"beats":8}]}
+"kill loop"            -> {"plan":[{"at":0,"action":"loop_deck","deck":1,"beats":8}]}
+"turn off the loop"    -> {"plan":[{"at":0,"action":"loop_deck","deck":1,"beats":8}]}
 
 MULTI-STEP example: bass swap (the canonical EQ-based DJ transition):
 "bass swap into deck 2" ->
