@@ -97,7 +97,7 @@ def execute_command(text: str) -> None:
         try:
             plan, source, parse_latency = parse_with_metadata(text)
         except ParseError as exc:
-            status.update(label=f"Could not parse: {exc}", state="error")
+            status.update(label=f"Could not parse: {exc}", state="error", expanded=True)
             st.session_state.history.insert(0, {
                 "time": time.strftime("%H:%M:%S"),
                 "text": text,
@@ -123,7 +123,7 @@ def execute_command(text: str) -> None:
         executor.run_plan(plan)
         exec_latency = time.monotonic() - exec_start
 
-        status.update(label=f"Done · {exec_latency:.2f}s execution", state="complete")
+        status.update(label=f"Done · {exec_latency:.2f}s execution", state="complete", expanded=True)
 
     summary = (
         f"{len(plan.steps)} steps"
@@ -150,7 +150,7 @@ def execute_plan_with_status(plan: ActionPlan, label: str, log_text: str) -> Non
         exec_start = time.monotonic()
         executor.run_plan(plan)
         exec_latency = time.monotonic() - exec_start
-        status.update(label=f"Done · {exec_latency:.2f}s", state="complete")
+        status.update(label=f"Done · {exec_latency:.2f}s", state="complete", expanded=True)
 
     st.session_state.history.insert(0, {
         "time": time.strftime("%H:%M:%S"),
