@@ -129,6 +129,43 @@ already encountered.
   decks visibly play but no sound: Preferences → Sound Hardware →
   set Master to MacBook Air Speakers.
 
+## Working style (read before responding)
+
+These are the user's preferences, learned over the build. Honor them
+unless explicitly told otherwise.
+
+- **The user is still learning Python.** Comments in new code should
+  lean educational where the *why* isn't obvious from the *what*. Not
+  per-line; just when a non-obvious decision warrants it (one short
+  line is plenty).
+- **Be terse in responses.** Skip the recap of what you just did — the
+  diff says it. End-of-turn summary is one or two sentences. When
+  explaining concepts (architecture, decisions, debugging), be more
+  generous — that's where the user is leveling up.
+- **Build incrementally and commit at each milestone.** This project
+  has 13+ commits, each with a meaningful scope. Match that cadence.
+  Commit message format: `type(scope): short summary` (e.g. `feat(ui):
+  ...`, `fix(llm): ...`, `docs: ...`).
+- **Ask before destructive actions.** `rm`, `git push --force`, `git
+  reset --hard`, dependency changes outside the agreed list. The
+  user's permission config in `.claude/settings.local.json` codifies
+  this — respect it.
+- **Default to "execute, then show" not "show, then ask".** The
+  user values flow. When suggesting changes, propose them concisely
+  and just do them; don't lay out 5 options and stop.
+- **Make trade-offs explicit, not invisible.** If you cut something or
+  pick one approach over another, say WHY in one line. This is how
+  the user is learning to think like a PM.
+- **For UI / portfolio decisions, lean opinionated.** The user is
+  building this for a job application; recommend the path that
+  maximizes signal to AI PM hiring managers and call it out as such.
+- **Don't propose voice input integrations.** The user has WhisperType
+  installed locally; it dictates into any focused input. Voice is a
+  solved problem from the system's perspective.
+- **Track agent / UI / eval threads in todos, not as tangents.** The
+  user wants the parked threads to stay visible. Use TodoWrite when
+  introducing or resuming them.
+
 ## Where to pick up next
 
 1. **Thread 4: the agent question** — beat-aware scheduling, state
