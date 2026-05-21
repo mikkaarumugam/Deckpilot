@@ -1,0 +1,14 @@
+# DeckPilot dashboard theme — "Linear / shipped AI product" direction.
+# Dark base, electric indigo accent, near-black background.
+# See docs/DECISIONS.md for the rationale on theme choice.
+
+[theme]
+base = "dark"
+primaryColor = "#6366f1"
+backgroundColor = "#0e0e10"
+secondaryBackgroundColor = "#1a1a22"
+textColor = "#e4e4e7"
+font = "sans serif"
+
+[server]
+headless = true

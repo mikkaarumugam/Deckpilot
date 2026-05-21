@@ -48,6 +48,163 @@ PRESETS = [
 
 
 # ---------------------------------------------------------------------------
+# Visual polish: custom CSS injection (Inter + JetBrains Mono, button polish,
+# colored source pills, status icons). The base theme lives in
+# .streamlit/config.toml — this layer adds typography and component detail
+# that the toml schema can't reach.
+# ---------------------------------------------------------------------------
+
+CUSTOM_CSS = """
+<style>
+/* --- Google Fonts --- */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+html, body, [class*="st-"], button, input, textarea, p, span, div {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif !important;
+}
+
+/* --- Code / inline `` blocks: use JetBrains Mono and a subtle dark chip --- */
+code, kbd, samp, [data-testid="stDataFrame"] {
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace !important;
+}
+code {
+    background: #1f1f28 !important;
+    color: #c7c7d1 !important;
+    padding: 2px 7px !important;
+    border-radius: 4px !important;
+    font-size: 0.86em !important;
+    border: 1px solid #2a2a35;
+}
+
+/* --- Headings: tight letter-spacing, semi-bold weight --- */
+h1, h2, h3, h4 {
+    font-weight: 600 !important;
+    letter-spacing: -0.015em !important;
+    color: #f4f4f5 !important;
+}
+h3 { font-size: 1.15rem !important; }
+
+/* --- Caption text muted --- */
+[data-testid="stCaptionContainer"], .stCaption {
+    color: #8b8b96 !important;
+}
+
+/* --- Buttons: rounded, smooth hover --- */
+.stButton > button, .stFormSubmitButton > button {
+    border-radius: 6px !important;
+    font-weight: 500 !important;
+    transition: all 0.15s ease !important;
+    border: 1px solid #2a2a35 !important;
+    background: #1a1a22 !important;
+    color: #e4e4e7 !important;
+}
+.stButton > button:hover, .stFormSubmitButton > button:hover {
+    background: #22222c !important;
+    border-color: #6366f1 !important;
+    color: #f4f4f5 !important;
+}
+/* Primary button — accent fill */
+.stButton > button[kind="primary"],
+.stFormSubmitButton > button[kind="primary"] {
+    background: #6366f1 !important;
+    border-color: #6366f1 !important;
+    color: #ffffff !important;
+}
+.stButton > button[kind="primary"]:hover,
+.stFormSubmitButton > button[kind="primary"]:hover {
+    background: #5558e3 !important;
+    border-color: #5558e3 !important;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.25);
+}
+
+/* --- Sidebar background, slightly different elevation --- */
+section[data-testid="stSidebar"] {
+    background: #14141a !important;
+    border-right: 1px solid #1f1f28 !important;
+}
+section[data-testid="stSidebar"] .stButton > button {
+    background: #1a1a22 !important;
+}
+
+/* --- Status / expander panel (where parsed plan renders) --- */
+div[data-testid="stExpander"] details {
+    background: #16161d !important;
+    border: 1px solid #2a2a35 !important;
+    border-radius: 8px !important;
+}
+div[data-testid="stExpander"] summary {
+    font-weight: 500 !important;
+}
+
+/* --- Dataframe (plan table): tighter, mono, less Streamlit chrome --- */
+[data-testid="stDataFrame"] {
+    border-radius: 6px !important;
+    border: 1px solid #2a2a35 !important;
+}
+
+/* --- Input box: better contrast --- */
+[data-testid="stTextInput"] input {
+    background: #16161d !important;
+    border: 1px solid #2a2a35 !important;
+    color: #e4e4e7 !important;
+    font-size: 0.95rem !important;
+}
+[data-testid="stTextInput"] input:focus {
+    border-color: #6366f1 !important;
+    box-shadow: 0 0 0 1px #6366f1 !important;
+}
+
+/* --- Dividers: subtle --- */
+hr {
+    border-color: #1f1f28 !important;
+    margin: 1.2rem 0 !important;
+    opacity: 0.7;
+}
+
+/* --- Source pills (regex / LLM badges) --- */
+.source-pill {
+    display: inline-block;
+    padding: 2px 9px;
+    border-radius: 11px;
+    font-size: 0.78em;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    margin-left: 4px;
+}
+.source-pill.regex {
+    background: rgba(16, 185, 129, 0.12);
+    color: #34d399;
+    border: 1px solid rgba(16, 185, 129, 0.25);
+}
+.source-pill.llm {
+    background: rgba(99, 102, 241, 0.14);
+    color: #a5a8ff;
+    border: 1px solid rgba(99, 102, 241, 0.3);
+}
+
+/* --- History status indicators --- */
+.status-ok { color: #34d399 !important; font-weight: 600; }
+.status-fail { color: #f87171 !important; font-weight: 600; }
+
+/* --- Sidebar footer (version tag) --- */
+.sidebar-footer {
+    color: #4a4a55;
+    font-size: 0.75em;
+    margin-top: 1.5rem;
+    text-align: center;
+    font-family: 'JetBrains Mono', monospace !important;
+}
+</style>
+"""
+
+
+def _inject_css() -> None:
+    """Inject the custom CSS layer. Called once per rerun, at the top of main()."""
+    st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------------------
 # Adapter + state setup
 # ---------------------------------------------------------------------------
 
@@ -113,10 +270,15 @@ def execute_command(text: str) -> None:
             })
             return
 
-        source_label = "⚡ regex" if source == "regex" else "🤖 LLM"
+        source_pill = (
+            '<span class="source-pill regex">⚡ regex</span>'
+            if source == "regex"
+            else '<span class="source-pill llm">🤖 LLM</span>'
+        )
         st.markdown(
-            f"**Input:** `{text}`  ·  **Source:** {source_label}  ·  "
-            f"**Parse:** `{parse_latency:.2f}s`"
+            f"**Input:** `{text}`  &nbsp;·&nbsp;  **Source:** {source_pill}  &nbsp;·&nbsp;  "
+            f"**Parse:** `{parse_latency:.2f}s`",
+            unsafe_allow_html=True,
         )
         _render_plan_table(plan)
         status.update(
@@ -251,6 +413,12 @@ def render_sidebar() -> str | None:
                      help="Pause both decks, center crossfader, EQs/volumes to neutral"):
             _trigger_reset()
 
+        # --- Sidebar footer ---
+        st.markdown(
+            '<div class="sidebar-footer">DeckPilot · v0.1.0</div>',
+            unsafe_allow_html=True,
+        )
+
     return preset_clicked
 
 
@@ -266,10 +434,14 @@ def render_history() -> None:
 
     for i, entry in enumerate(history[:20]):
         col_time, col_text, col_summary, col_status, col_undo = st.columns([2, 5, 4, 1, 1])
-        col_time.text(entry["time"])
-        col_text.text(f'"{entry["text"]}"')
-        col_summary.text(entry["summary"])
-        col_status.text(entry["status"])
+        col_time.markdown(f"<code>{entry['time']}</code>", unsafe_allow_html=True)
+        col_text.markdown(f'"{entry["text"]}"')
+        col_summary.markdown(f"<code>{entry['summary']}</code>", unsafe_allow_html=True)
+        status_class = "status-ok" if entry["status"] == "✓" else "status-fail"
+        col_status.markdown(
+            f'<span class="{status_class}">{entry["status"]}</span>',
+            unsafe_allow_html=True,
+        )
         if entry.get("plan") is not None:
             if col_undo.button("↶", key=f"undo_{i}", help="Undo this command"):
                 _trigger_undo(i)
@@ -286,6 +458,7 @@ def main() -> None:
         layout="wide",
         initial_sidebar_state="expanded",
     )
+    _inject_css()
     init_state()
 
     # Sidebar renders first so we can capture preset clicks before the main area runs.
