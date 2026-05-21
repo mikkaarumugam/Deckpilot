@@ -89,6 +89,7 @@ GitHub. Add to portfolio.
 | **MCP server** | Nice future option but not portfolio-critical. Mentioned in README "what's next". |
 | **State read-back from Mixxx** | Required for Thread 4. Will design once we start that thread. |
 | **Anthropic SDK + prompt caching** | Documented swap path in `llm.py`. Adds metered cost; not needed at single-user scale. |
+| **FastAPI + React/Tailwind rewrite** | Streamlit ceiling reached but EVAL.md is higher-leverage. See D-014. ~4h migration when revisited. |
 | **VirtualDJ Pro HTTP API** | VDJ is paid/throttled. We pivoted away. |
 | **Mobile or web-deployed** | Local-only by design. Portfolio is a desktop demo. |
 

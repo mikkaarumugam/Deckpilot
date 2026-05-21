@@ -5,6 +5,34 @@ matters more than the *what* (the code is the what). Newest first.
 
 ---
 
+## D-014 · Defer FastAPI + React migration (P2)
+**Date:** 2026-05-21
+
+**Context.** Streamlit's design ceiling is real — even with the Linear-
+style theme + custom CSS, ~30% of visual polish is locked behind
+Streamlit's chrome. A FastAPI + React/Tailwind rewrite would deliver
+pixel-perfect UI with animations, hover states, real-feel interactions.
+
+**Decision.** Defer. Focus on the AI PM portfolio essentials first:
+EVAL.md, demo video, README polish, GitHub push. Revisit React
+migration as a P2 task after the portfolio is shippable.
+
+**Trade-off.** Streamlit ships with default chrome that's recognizable
+as "AI demo." A React app would read as "polished product." For AI PM
+hiring specifically, EVAL.md is more differentiating than visual
+polish, so the time budget is better spent there. For consumer/design-
+heavy PM roles, the calculus might flip.
+
+**If we revisit:** the architecture is designed for this swap.
+~4 hours total — FastAPI shim (~45 min) exposing the existing parser/
+executor/adapter as HTTP endpoints, React app generated via claude.ai
+Artifacts (~30 min iterating), wiring (~1-2h), optional deploy
+(~30 min). The Python backend doesn't move.
+
+**Status.** Deferred. Listed in ROADMAP.md "Deferred" section.
+
+---
+
 ## D-013 · Default deck = 1 when LLM gets ambiguous input
 **Date:** 2026-05-20 · **Commit:** `b84ec8c`
 
