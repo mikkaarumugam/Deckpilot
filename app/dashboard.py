@@ -1,14 +1,22 @@
 """
-DeckPilot dashboard — Streamlit frontend for the DJ control system.
+DeckPilot dashboard — Streamlit frontend.
+
+Sidebar layout:
+  - Left sidebar: app name, preset buttons, queue panel, utility controls.
+  - Main area: input form, parsed-plan + execution status, history.
 
 UX patterns at play:
   - Plan-visible-before-audio: st.status renders the parsed plan table
     BEFORE the executor fires the MIDI. Eyes confirm before ears.
-  - One-click undo per history entry, with computed inverses.
-  - Queue: pre-build a sequence of commands, review/reorder, then commit.
-    Same surface that an agent would use to expose its plan.
-  - Reset state: hard "go back to neutral" button — pause decks, crossfader
-    center, EQs and volumes to default. Useful when something gets weird.
+  - One-click ↶ undo per history entry, with computed inverses.
+  - Queue: pre-build a sequence of commands, review/reorder in the
+    sidebar, then commit. Same surface an agent would use to expose
+    its plan to the user.
+  - Reset Mixxx: hard "go back to neutral" panic button.
+
+Sidebar button clicks (Run queue, Reset, etc.) defer execution to the
+main area via session_state so the status panels and any new history
+entries render in the right column.
 
 Run:
     streamlit run app/dashboard.py
@@ -40,7 +48,7 @@ PRESETS = [
 
 
 # ---------------------------------------------------------------------------
-# State + adapter setup
+# Adapter + state setup
 # ---------------------------------------------------------------------------
 
 def get_executor() -> Executor:
@@ -54,7 +62,7 @@ def get_executor() -> Executor:
 
 def init_state() -> None:
     st.session_state.setdefault("history", [])
-    st.session_state.setdefault("queue", [])  # list[str] of pending commands
+    st.session_state.setdefault("queue", [])
 
 
 # ---------------------------------------------------------------------------
@@ -78,10 +86,7 @@ def _describe_action(action: Any) -> str:
 
 def _render_plan_table(plan: ActionPlan) -> None:
     rows = [
-        {
-            "Time": f"{step.at_seconds:5.2f}s",
-            "Action": _describe_action(step.action),
-        }
+        {"Time": f"{step.at_seconds:5.2f}s", "Action": _describe_action(step.action)}
         for step in plan.steps
     ]
     st.dataframe(rows, width="stretch", hide_index=True)
@@ -158,22 +163,12 @@ def execute_plan_with_status(plan: ActionPlan, label: str, log_text: str) -> Non
         "summary": f"{len(plan.steps)} steps",
         "status": "✓",
         "detail": f"system, {exec_latency:.2f}s exec",
-        "plan": None,  # system-generated plans aren't user-undoable
+        "plan": None,
     })
 
 
-def execute_queue() -> None:
-    """Run every queued command in order."""
-    queue: list[str] = st.session_state.queue
-    if not queue:
-        return
-    st.session_state.queue = []   # consume up-front so a failure doesn't loop
-    for text in queue:
-        execute_command(text)
-
-
 # ---------------------------------------------------------------------------
-# History interactions
+# History / undo / reset triggers
 # ---------------------------------------------------------------------------
 
 def _trigger_undo(entry_index: int) -> None:
@@ -203,31 +198,65 @@ def _trigger_clear_history() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Rendering
+# Sidebar
 # ---------------------------------------------------------------------------
 
-def render_queue() -> None:
-    queue: list[str] = st.session_state.queue
-    header_col, run_col, clear_col = st.columns([5, 2, 2])
-    header_col.markdown(f"**📥 Queue ({len(queue)})**")
-    if queue:
-        if run_col.button("Run queue", type="primary", width="stretch", key="run_queue"):
-            execute_queue()
-        if clear_col.button("Clear", width="stretch", key="clear_queue"):
-            st.session_state.queue = []
-            st.toast("Queue cleared.", icon="🧹")
-    else:
-        st.caption("(empty — submit with the Queue button to add)")
-        return
+def render_sidebar() -> str | None:
+    """Build sidebar widgets. Return a preset's text if one was clicked."""
+    preset_clicked: str | None = None
 
-    for i, text in enumerate(queue):
-        idx_col, text_col, remove_col = st.columns([1, 8, 1])
-        idx_col.text(f"{i + 1}.")
-        text_col.text(f'"{text}"')
-        if remove_col.button("✕", key=f"queue_remove_{i}", help="Remove from queue"):
-            st.session_state.queue.pop(i)
-            st.rerun()
+    with st.sidebar:
+        st.title("🎚️ DeckPilot")
+        st.caption("Natural-language Mixxx control")
 
+        st.divider()
+
+        # --- Presets ---
+        st.markdown("**Try these**")
+        for i, preset in enumerate(PRESETS):
+            if st.button(preset, key=f"preset_{i}", width="stretch"):
+                preset_clicked = preset
+
+        st.divider()
+
+        # --- Queue ---
+        queue: list[str] = st.session_state.queue
+        st.markdown(f"**📥 Queue** · {len(queue)} pending")
+        if not queue:
+            st.caption("Use the *Queue* button under the input to add commands.")
+        else:
+            for i, text in enumerate(queue):
+                cols = st.columns([7, 1])
+                cols[0].text(f"{i + 1}. {text}")
+                if cols[1].button("✕", key=f"queue_remove_{i}", help="Remove"):
+                    st.session_state.queue.pop(i)
+                    st.rerun()
+            col_run, col_clear = st.columns(2)
+            if col_run.button("Run queue", type="primary", key="run_queue", width="stretch"):
+                # Defer execution to the main area so status panels render there.
+                st.session_state.queue_to_run = list(st.session_state.queue)
+                st.session_state.queue = []
+                st.rerun()
+            if col_clear.button("Clear", key="clear_queue", width="stretch"):
+                st.session_state.queue = []
+                st.rerun()
+
+        st.divider()
+
+        # --- Controls ---
+        st.markdown("**Controls**")
+        if st.button("🧹 Clear history", key="clear_history", width="stretch"):
+            _trigger_clear_history()
+        if st.button("🎚️ Reset Mixxx", key="reset_state", width="stretch",
+                     help="Pause both decks, center crossfader, EQs/volumes to neutral"):
+            _trigger_reset()
+
+    return preset_clicked
+
+
+# ---------------------------------------------------------------------------
+# History panel (main area)
+# ---------------------------------------------------------------------------
 
 def render_history() -> None:
     history = st.session_state.history
@@ -251,20 +280,25 @@ def render_history() -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    st.set_page_config(page_title="DeckPilot", page_icon="🎚️", layout="centered")
+    st.set_page_config(
+        page_title="DeckPilot",
+        page_icon="🎚️",
+        layout="wide",
+        initial_sidebar_state="expanded",
+    )
     init_state()
 
-    st.title("🎚️ DeckPilot")
-    st.caption("Natural-language control for Mixxx · MIDI via IAC Driver")
+    # Sidebar renders first so we can capture preset clicks before the main area runs.
+    sidebar_preset = render_sidebar()
 
-    submit_text: str | None = None
+    submit_text: str | None = sidebar_preset
     queue_text: str | None = None
 
-    # --- Input form (Execute + Queue) ---
+    # --- Main area: input form ---
     with st.form("command_form", clear_on_submit=True):
         text = st.text_input(
             "Command",
-            placeholder="Type a command, e.g. 'bass swap into deck 2'",
+            placeholder="Type a DJ command — e.g. 'bass swap into deck 2 over 4 seconds'",
             label_visibility="collapsed",
         )
         exec_col, queue_col = st.columns(2)
@@ -273,42 +307,28 @@ def main() -> None:
         if queue_col.form_submit_button("Queue", width="stretch"):
             queue_text = text.strip() or None
 
-    # --- Presets (always execute, never queue — they're for the demo) ---
-    st.markdown("**Try these:**")
-    cols = st.columns(2)
-    for i, preset in enumerate(PRESETS):
-        with cols[i % 2]:
-            if st.button(preset, key=f"preset_{i}", width="stretch"):
-                submit_text = preset
-
-    st.divider()
-
-    # --- Queue panel ---
-    render_queue()
+    # Queue additions: append, then rerun so the sidebar updates.
     if queue_text:
         st.session_state.queue.append(queue_text)
+        st.toast(f"Queued: {queue_text!r}", icon="📥")
         st.rerun()
 
-    st.divider()
-
-    # --- Execution area: fresh command OR a deferred system plan (undo/reset) ---
+    # --- Execution area (always renders here, never in sidebar) ---
+    queue_to_run = st.session_state.pop("queue_to_run", None)
     pending_system = st.session_state.pop("pending_system_plan", None)
-    if submit_text:
+
+    if queue_to_run:
+        for text in queue_to_run:
+            execute_command(text)
+    elif submit_text:
         execute_command(submit_text)
     elif pending_system is not None:
         plan, log_text, status_label = pending_system
         execute_plan_with_status(plan, status_label, log_text)
 
+    # --- History panel ---
     st.divider()
-
-    # --- History panel with utility buttons ---
-    title_col, clear_col, reset_col = st.columns([6, 2, 2])
-    title_col.subheader("📜 History  ·  click ↶ to undo")
-    if clear_col.button("🧹 Clear history", width="stretch", key="clear_history"):
-        _trigger_clear_history()
-    if reset_col.button("🎚️ Reset Mixxx", width="stretch", help="Pause both decks, center crossfader, EQs and volumes to neutral", key="reset_state"):
-        _trigger_reset()
-
+    st.subheader("📜 History  ·  click ↶ to undo")
     render_history()
 
 
