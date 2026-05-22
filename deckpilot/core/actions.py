@@ -92,14 +92,18 @@ class LoadTrack:
     """Load a library track onto a deck.
 
     Not a MIDI action — Mixxx 2.5's controller-script API has no
-    path-based load primitive. The adapter dispatches this via
-    `open -a Mixxx <file>`, which macOS routes to the running Mixxx
-    instance. Mixxx loads the file to its focus deck; if that doesn't
-    match `self.deck`, the user can click the target deck once before
-    re-issuing. See DECISIONS § D-015.
+    path-based load primitive. The adapter raises LoadTrackSuggestion
+    carrying the resolved Track; the dashboard renders a suggestion
+    card. See DECISIONS § D-015.
+
+    `reasoning` is the LLM's one-line explanation for the pick (BPM
+    fit, key compatibility, vibe match). Optional — empty when the
+    action comes from regex or a test fixture. Surfaced on the
+    suggestion card so the AI's choice is legible, not opaque.
     """
     deck: int
     track_id: int  # library row id from LibraryReader
+    reasoning: str = ""
 
 
 # Union of every atomic action type.

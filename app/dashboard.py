@@ -446,6 +446,20 @@ def _render_suggestion_card(sug: LoadTrackSuggestion) -> None:
     bpm = f"{t.bpm:.1f} BPM" if t.bpm > 0 else "BPM not analysed"
     key = t.key or "—"
     genre = t.genre or "—"
+    reasoning = sug.action.reasoning.strip()
+    # Render the LLM's reasoning block only if it provided one. Regex
+    # hits or empty replies skip this block instead of showing a hollow
+    # "why this track:" with nothing in it.
+    reasoning_block = (
+        f"""<div style="color:#c7c7d1;font-size:0.86em;margin:0.6rem 0 0;
+                       border-top:1px solid #2a2a35;padding-top:0.55rem;
+                       font-style:italic;">
+              <span style="color:#a5a8ff;font-style:normal;font-weight:500;">
+                Why this track:</span> {reasoning}
+            </div>"""
+        if reasoning
+        else ""
+    )
 
     st.markdown(
         f"""
@@ -466,6 +480,7 @@ def _render_suggestion_card(sug: LoadTrackSuggestion) -> None:
     <span>key: <code>{key}</code></span>
     <span>genre: <code>{genre}</code></span>
   </div>
+  {reasoning_block}
   <div style="color:#6b6b75;font-size:0.78em;margin-top:0.6rem;
               border-top:1px solid #2a2a35;padding-top:0.5rem;">
     Mixxx 2.5 has no path-based load API — drag this onto deck {sug.action.deck}

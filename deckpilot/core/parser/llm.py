@@ -79,7 +79,7 @@ Supported atomic actions:
   set_volume     {"action":"set_volume",     "deck":1|2, "value":float 0..1}
   hot_cue        {"action":"hot_cue",        "deck":1|2, "cue":int 1..8}
   sync           {"action":"sync",           "deck":1|2}
-  load_track     {"action":"load_track",     "deck":1|2, "track_id":int}    // only when LIBRARY CONTEXT is provided below
+  load_track     {"action":"load_track",     "deck":1|2, "track_id":int, "reasoning":string}    // only when LIBRARY CONTEXT is provided. "reasoning" is one short line explaining the pick (BPM fit, key, vibe).
 
 Rules:
 - Output ONLY JSON. No prose, no markdown fences.
@@ -133,14 +133,23 @@ Bass-swap rationale (so you can adapt for variants like "8-second bass swap"):
 
 LIBRARY-AWARE example (only valid when LIBRARY CONTEXT is provided):
 "queue a daft punk track on deck 2" ->
-{"plan":[{"at":0,"action":"load_track","deck":2,"track_id":<one Daft Punk id from the library>}]}
+{"plan":[{"at":0,"action":"load_track","deck":2,"track_id":<id>,"reasoning":"<one short line>"}]}
+
+Reasoning style — keep it tight, 1-2 short clauses naming the picked criteria.
+Examples of good reasoning strings:
+  "121.3 BPM fits deck 1's 116 with a small pitch nudge; key C is neutral"
+  "90.6 BPM matches the user's '~90' ask exactly"
+  "Lowest-BPM track in the library — best fit for 'chill'"
+  "Only Daft Punk track at a BPM compatible with deck 1's 116"
+Bad reasoning (skip these): "this is a good track", "user requested it",
+empty string, more than two sentences.
 
 LIBRARY-AWARE + multi-step ("queue X and bass swap into it" — pick the most
 BPM-compatible track to the currently-playing deck, then transition):
 "queue a daft punk track and bass swap into deck 2 over 4 seconds" ->
 {
   "plan": [
-    {"at":0, "action":"load_track",     "deck":2, "track_id":<id>},
+    {"at":0, "action":"load_track",     "deck":2, "track_id":<id>, "reasoning":"<one line>"},
     {"at":0, "action":"sync",           "deck":2},
     {"at":0, "action":"set_eq",         "deck":2, "band":"low", "value":0.0},
     {"at":0, "action":"play_deck",      "deck":2},
@@ -351,6 +360,7 @@ def _payload_to_action(payload: dict[str, Any], *, original_text: str) -> DJActi
             return LoadTrack(
                 deck=int(payload["deck"]),
                 track_id=int(payload["track_id"]),
+                reasoning=str(payload.get("reasoning", "")).strip(),
             )
     except (KeyError, ValueError, TypeError) as exc:
         raise LLMParseError(
