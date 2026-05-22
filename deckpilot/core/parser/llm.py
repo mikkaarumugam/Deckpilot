@@ -17,13 +17,14 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from deckpilot.core.actions import (
     ActionPlan,
     DJAction,
     FadeToDeck,
     HotCue,
+    LoadTrack,
     LoopDeck,
     NudgeDeck,
     PauseDeck,
@@ -35,6 +36,10 @@ from deckpilot.core.actions import (
     TimedAction,
 )
 from .errors import ParseError
+
+if TYPE_CHECKING:
+    from deckpilot.adapters.midi_feedback import MixxxState
+    from deckpilot.library import LibraryReader
 
 
 CLAUDE_BINARY = "claude"
@@ -48,7 +53,7 @@ TIMEOUT_SECONDS = 30
 LLM_MODEL = "haiku"
 
 
-SYSTEM_PROMPT = """\
+SYSTEM_PROMPT_BASE = """\
 You are a parser for a DJ-control system called DeckPilot. Convert a
 natural-language DJ command into an ActionPlan: a JSON object describing
 one or more timed actions.
@@ -74,6 +79,7 @@ Supported atomic actions:
   set_volume     {"action":"set_volume",     "deck":1|2, "value":float 0..1}
   hot_cue        {"action":"hot_cue",        "deck":1|2, "cue":int 1..8}
   sync           {"action":"sync",           "deck":1|2}
+  load_track     {"action":"load_track",     "deck":1|2, "track_id":int}    // only when LIBRARY CONTEXT is provided below
 
 Rules:
 - Output ONLY JSON. No prose, no markdown fences.
@@ -125,17 +131,116 @@ Bass-swap rationale (so you can adapt for variants like "8-second bass swap"):
 - At the fade end, bring deck 2's bass back to neutral.
 - Always: bass-cut events go to set_eq with band="low", value=0.0.
 
-UNKNOWN example:
-"play me a Daft Punk song" -> {"plan":[], "unknown":"track selection not supported"}
+LIBRARY-AWARE example (only valid when LIBRARY CONTEXT is provided):
+"queue a daft punk track on deck 2" ->
+{"plan":[{"at":0,"action":"load_track","deck":2,"track_id":<one Daft Punk id from the library>}]}
+
+LIBRARY-AWARE + multi-step ("queue X and bass swap into it" — pick the most
+BPM-compatible track to the currently-playing deck, then transition):
+"queue a daft punk track and bass swap into deck 2 over 4 seconds" ->
+{
+  "plan": [
+    {"at":0, "action":"load_track",     "deck":2, "track_id":<id>},
+    {"at":0, "action":"sync",           "deck":2},
+    {"at":0, "action":"set_eq",         "deck":2, "band":"low", "value":0.0},
+    {"at":0, "action":"play_deck",      "deck":2},
+    {"at":0, "action":"fade_to_deck",   "deck":2, "seconds":4},
+    {"at":2, "action":"set_eq",         "deck":1, "band":"low", "value":0.0},
+    {"at":4, "action":"set_eq",         "deck":2, "band":"low", "value":1.0}
+  ]
+}
+
+Track-selection guidance (when LIBRARY CONTEXT is provided):
+- Pick by criteria the user gave: artist, genre, BPM range, "vibe".
+- Prefer tracks whose BPM is within ~6 BPM of the currently-playing deck
+  (good for sync without huge pitch nudging). When the user is asking to
+  transition, this is especially important.
+- Prefer tracks whose key is musically compatible (same key, relative
+  minor/major, or +/-1 in the Camelot wheel) — but BPM compatibility
+  matters more than key.
+- If the user says "queue/load/find X" without specifying a deck, pick the
+  deck that ISN'T currently playing (from CURRENT DECK STATE below). If
+  both are paused, default to deck 2.
+- If MULTIPLE tracks match equally, pick the one with timesplayed=0 (a
+  "rotate the catalog" heuristic). The library snapshot doesn't include
+  timesplayed yet, so for now just pick the first ID in the list.
+- If NO tracks match, decline cleanly: {"plan":[],"unknown":"no matching tracks in library"}.
+
+UNKNOWN example (with NO library context provided):
+"play me a Daft Punk song" -> {"plan":[], "unknown":"track selection not supported (no library context)"}
 """
+
+
+def _render_library_block(library: "LibraryReader | None") -> str:
+    """One compact snapshot block per parse call. The model uses these
+    ids to emit load_track actions. Skipped entirely when no library
+    is provided, which keeps the prompt small for non-library prompts."""
+    if library is None:
+        return ""
+    tracks = library.list_tracks()
+    if not tracks:
+        return "\nLIBRARY CONTEXT: (empty library — decline any track-selection request)\n"
+    lines = ["", "LIBRARY CONTEXT (all available tracks, reference by id):"]
+    for t in tracks:
+        bpm = f"{t.bpm:.1f}" if t.bpm > 0 else "?"
+        key = t.key or "?"
+        genre = t.genre or "?"
+        # Compact one-liner so even a 200-track library fits in a few KB.
+        lines.append(
+            f"  id={t.id}: {t.artist} — {t.title}  "
+            f"[bpm={bpm}, key={key}, genre={genre}]"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _render_deck_state_block(deck_state: "MixxxState | None") -> str:
+    """Live deck state from Mixxx feedback. Optional — when provided
+    the model uses it for 'pick the deck that isn't playing' decisions."""
+    if deck_state is None:
+        return ""
+    lines = ["", "CURRENT DECK STATE (from Mixxx live feedback):"]
+    for n in (1, 2):
+        d = deck_state.deck(n)
+        bpm = f"{d.bpm:.1f}" if d.bpm > 0 else "?"
+        status = "PLAYING" if d.playing else "paused"
+        lines.append(f"  deck {n}: {status}, bpm={bpm}")
+    return "\n".join(lines) + "\n"
+
+
+def build_system_prompt(
+    library: "LibraryReader | None" = None,
+    deck_state: "MixxxState | None" = None,
+) -> str:
+    """Compose the full system prompt with optional runtime context."""
+    return (
+        SYSTEM_PROMPT_BASE
+        + _render_library_block(library)
+        + _render_deck_state_block(deck_state)
+    )
+
+
+# Static export for callers that don't have runtime context (tests, the
+# regex eval) — backwards compatible with v0.1.
+SYSTEM_PROMPT = build_system_prompt()
 
 
 class LLMParseError(ParseError):
     """Raised when the LLM returns invalid or unsupported JSON."""
 
 
-def parse(text: str) -> ActionPlan:
-    """Call Claude via `claude -p` and turn its JSON into an ActionPlan."""
+def parse(
+    text: str,
+    *,
+    library: "LibraryReader | None" = None,
+    deck_state: "MixxxState | None" = None,
+) -> ActionPlan:
+    """Call Claude via `claude -p` and turn its JSON into an ActionPlan.
+
+    `library` and `deck_state` are optional runtime context. When
+    provided, the LLM can pick tracks (LoadTrack) and reason about which
+    deck to use. When omitted, the model declines library-related
+    requests with a clear reason.
+    """
     if shutil.which(CLAUDE_BINARY) is None:
         raise LLMParseError(
             f"{CLAUDE_BINARY!r} CLI not found on PATH. Install Claude Code "
@@ -144,7 +249,7 @@ def parse(text: str) -> ActionPlan:
         )
 
     full_prompt = (
-        SYSTEM_PROMPT
+        build_system_prompt(library=library, deck_state=deck_state)
         + "\n\nUser command:\n"
         + text
         + "\n\nReturn ONLY the JSON object now."
@@ -242,6 +347,11 @@ def _payload_to_action(payload: dict[str, Any], *, original_text: str) -> DJActi
             return HotCue(deck=int(payload["deck"]), cue=int(payload["cue"]))
         if name == "sync":
             return Sync(deck=int(payload["deck"]))
+        if name == "load_track":
+            return LoadTrack(
+                deck=int(payload["deck"]),
+                track_id=int(payload["track_id"]),
+            )
     except (KeyError, ValueError, TypeError) as exc:
         raise LLMParseError(
             f"LLM JSON failed validation for action={name!r}: {payload!r}"

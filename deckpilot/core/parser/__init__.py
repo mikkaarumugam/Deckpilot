@@ -15,13 +15,25 @@ sequence of atomic actions.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from deckpilot.core.actions import ActionPlan
 
 from . import llm, regex
 from .errors import ParseError  # re-exported for callers
 
+if TYPE_CHECKING:
+    from deckpilot.adapters.midi_feedback import MixxxState
+    from deckpilot.library import LibraryReader
 
-def parse(text: str, *, mode: str = "auto") -> ActionPlan:
+
+def parse(
+    text: str,
+    *,
+    mode: str = "auto",
+    library: "LibraryReader | None" = None,
+    deck_state: "MixxxState | None" = None,
+) -> ActionPlan:
     """
     Parse natural-language text into an ActionPlan.
 
@@ -29,6 +41,10 @@ def parse(text: str, *, mode: str = "auto") -> ActionPlan:
         "auto"  — regex first, fall back to LLM (default)
         "regex" — regex only; raises ParseError on no match
         "llm"   — skip regex; go straight to the LLM
+
+    `library` and `deck_state` are runtime context forwarded to the LLM
+    when it's invoked (regex doesn't need them). Without them, library-
+    aware actions like LoadTrack will be declined.
     """
     if mode not in {"auto", "regex", "llm"}:
         raise ValueError(f"unknown parser mode: {mode!r}")
@@ -40,4 +56,4 @@ def parse(text: str, *, mode: str = "auto") -> ActionPlan:
         if mode == "regex":
             raise ParseError(f"no regex rule matched: {text!r}")
 
-    return llm.parse(text)
+    return llm.parse(text, library=library, deck_state=deck_state)

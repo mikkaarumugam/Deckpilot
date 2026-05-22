@@ -87,6 +87,21 @@ class Sync:
     deck: int
 
 
+@dataclass(frozen=True)
+class LoadTrack:
+    """Load a library track onto a deck.
+
+    Not a MIDI action — Mixxx 2.5's controller-script API has no
+    path-based load primitive. The adapter dispatches this via
+    `open -a Mixxx <file>`, which macOS routes to the running Mixxx
+    instance. Mixxx loads the file to its focus deck; if that doesn't
+    match `self.deck`, the user can click the target deck once before
+    re-issuing. See DECISIONS § D-015.
+    """
+    deck: int
+    track_id: int  # library row id from LibraryReader
+
+
 # Union of every atomic action type.
 DJAction = Union[
     PlayDeck,
@@ -99,6 +114,7 @@ DJAction = Union[
     SetVolume,
     HotCue,
     Sync,
+    LoadTrack,
 ]
 
 

@@ -30,9 +30,9 @@ from typing import Any
 
 import streamlit as st
 
-from deckpilot.adapters.midi import MidiAdapter
+from deckpilot.adapters.midi import LoadTrackSuggestion, MidiAdapter
 from deckpilot.adapters.midi_feedback import MixxxFeedback
-from deckpilot.core.actions import ActionPlan
+from deckpilot.core.actions import ActionPlan, LoadTrack
 from deckpilot.core.executor import Executor
 from deckpilot.core.parser import parse as facade_parse
 from deckpilot.core.parser import regex as regex_parser
@@ -211,9 +211,14 @@ def _inject_css() -> None:
 # ---------------------------------------------------------------------------
 
 def get_executor() -> Executor:
-    """Cached so the IAC port isn't reopened on every Streamlit rerun."""
+    """Cached so the IAC port isn't reopened on every Streamlit rerun.
+
+    Inject the LibraryReader into the MidiAdapter so LoadTrack actions
+    can resolve file paths from track ids. Adapter still works if the
+    library isn't available — LoadTrack just raises a helpful error.
+    """
     if "executor" not in st.session_state:
-        adapter = MidiAdapter()
+        adapter = MidiAdapter(library=get_library())
         st.session_state.executor = Executor(adapter)
         st.session_state.port_name = adapter.port_name
     return st.session_state.executor
@@ -276,11 +281,18 @@ def init_state() -> None:
 # ---------------------------------------------------------------------------
 
 def parse_with_metadata(text: str) -> tuple[ActionPlan, str, float]:
+    """Parse with runtime context: library + live deck state from Mixxx
+    feedback. Regex doesn't use them; the LLM does (track selection,
+    'pick the deck that isn't playing', BPM-compatible matching)."""
     start = time.monotonic()
     plan = regex_parser.parse(text)
     if plan is not None:
         return plan, "regex", time.monotonic() - start
-    plan = facade_parse(text)
+
+    library = get_library()
+    feedback = get_feedback()
+    deck_state = feedback.snapshot() if feedback is not None else None
+    plan = facade_parse(text, library=library, deck_state=deck_state)
     return plan, "llm", time.monotonic() - start
 
 
@@ -336,10 +348,33 @@ def execute_command(text: str) -> None:
 
         executor = get_executor()
         exec_start = time.monotonic()
-        executor.run_plan(plan)
-        exec_latency = time.monotonic() - exec_start
-
-        status.update(label=f"Done · {exec_latency:.2f}s execution", state="complete", expanded=True)
+        try:
+            executor.run_plan(plan)
+            exec_latency = time.monotonic() - exec_start
+            status.update(
+                label=f"Done · {exec_latency:.2f}s execution",
+                state="complete", expanded=True,
+            )
+        except LoadTrackSuggestion as sug:
+            # Not an error — the executor hit a LoadTrack step. Mixxx 2.5
+            # has no path-based load API, so we surface the LLM's choice
+            # to the user as a suggestion card and stop the rest of the
+            # plan (subsequent steps assume the load happened).
+            exec_latency = time.monotonic() - exec_start
+            _render_suggestion_card(sug)
+            status.update(
+                label="Suggestion ready — load manually in Mixxx",
+                state="complete", expanded=True,
+            )
+            st.session_state.history.insert(0, {
+                "time": time.strftime("%H:%M:%S"),
+                "text": text,
+                "summary": _describe_suggestion(sug),
+                "status": "💡",
+                "detail": f"{source}, {parse_latency:.2f}s parse — track suggestion",
+                "plan": None,
+            })
+            return
 
     summary = (
         f"{len(plan.steps)} steps"
@@ -354,6 +389,59 @@ def execute_command(text: str) -> None:
         "detail": f"{source}, {parse_latency:.2f}s parse + {exec_latency:.2f}s exec",
         "plan": plan,
     })
+
+
+def _describe_suggestion(sug: LoadTrackSuggestion) -> str:
+    if sug.track is None:
+        return f"Suggest track_id={sug.action.track_id} on deck {sug.action.deck}"
+    return f"Suggest: {sug.track.title[:50]} on deck {sug.action.deck}"
+
+
+def _render_suggestion_card(sug: LoadTrackSuggestion) -> None:
+    """Surface the LLM's track choice as a styled card. Mixxx 2.5's
+    controller API has no path-based load, so this is the deliverable:
+    library-aware reasoning made visible. The user loads manually if
+    they want to follow the suggestion."""
+    t = sug.track
+    if t is None:
+        st.warning(
+            f"LLM suggested track id={sug.action.track_id} on deck "
+            f"{sug.action.deck}, but the library reader couldn't resolve it."
+        )
+        return
+
+    bpm = f"{t.bpm:.1f} BPM" if t.bpm > 0 else "BPM not analysed"
+    key = t.key or "—"
+    genre = t.genre or "—"
+
+    st.markdown(
+        f"""
+<div style="background:#16161d;border:1px solid #6366f1;border-radius:8px;
+            padding:1rem 1.2rem;margin:0.6rem 0;">
+  <div style="color:#a5a8ff;font-size:0.78em;font-weight:600;letter-spacing:0.05em;
+              text-transform:uppercase;margin-bottom:0.3rem;">
+    💡 AI suggests for deck {sug.action.deck}
+  </div>
+  <div style="font-weight:600;color:#f4f4f5;font-size:1.05em;margin-bottom:0.2rem;">
+    {t.title}
+  </div>
+  <div style="color:#a1a1aa;font-size:0.88em;margin-bottom:0.6rem;">
+    {t.artist}
+  </div>
+  <div style="display:flex;gap:1rem;font-size:0.82em;color:#8b8b96;">
+    <span><code>{bpm}</code></span>
+    <span>key: <code>{key}</code></span>
+    <span>genre: <code>{genre}</code></span>
+  </div>
+  <div style="color:#6b6b75;font-size:0.78em;margin-top:0.6rem;
+              border-top:1px solid #2a2a35;padding-top:0.5rem;">
+    Mixxx 2.5 has no path-based load API — drag this onto deck {sug.action.deck}
+    in Mixxx if you want to follow the suggestion.
+  </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
 
 
 def execute_plan_with_status(plan: ActionPlan, label: str, log_text: str) -> None:
