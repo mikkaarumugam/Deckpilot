@@ -5,6 +5,127 @@ matters more than the *what* (the code is the what). Newest first.
 
 ---
 
+## D-017 · BPM lookup via `file_bpm`, not `bpm`, for library matching
+**Date:** 2026-05-22 · **Commit:** `e1c3b0e`
+
+**Context.** The sidebar's live-state panel matches the BPM Mixxx
+emits against the library DB to surface the loaded track's title.
+First version subscribed to `[ChannelN].bpm` — the LIVE playback BPM.
+
+**Problem found in testing.** Two issues with `bpm`: (a) it drifts as
+the user pitch-nudges a deck, breaking the library match; (b) for
+tracks Mixxx hasn't analyzed yet, `bpm` returns a non-zero ESTIMATE
+which gives a confidently-wrong sidebar match.
+
+**Decision.** Switch the JS `engine.makeConnection` subscription to
+`file_bpm` — the canonical BPM stored in the track's metadata. It's
+constant across the playback session, matches `library.bpm` directly,
+and is `0.0` for un-analyzed tracks (which the sidebar then labels
+honestly: "BPM not yet analysed").
+
+**Trade-off.** We lose live-BPM tracking during pitch nudges. That's
+fine — pitch nudges are a *transient* DJ technique; the library
+identity of the loaded track doesn't change. State read-back is about
+"which track is on which deck," not about pitch state.
+
+**Status.** Active. See GOTCHAS for the related Mixxx-flushes-on-quit
+behavior that complicates this even with `file_bpm`.
+
+---
+
+## D-016 · MIDI state read-back via `<output>` + JS scripted output
+**Date:** 2026-05-22 · **Commit:** `e1c3b0e`
+
+**Context.** Session 2 needed Python to *see* what Mixxx was doing
+(play state, BPM) without polling or guessing. Mixxx exposes state via
+several channels: standard `<output>` MIDI bindings (binary), scripted
+JS output (continuous), HTTP API (2.6+ only — third-party in 2.5),
+OSC (setup-heavy). All four are listed in `docs/AGENT_DESIGN.md`.
+
+**Decision.** Hybrid MIDI: standard `<output>` for the binary case
+(play state — fires when `[ChannelN].play` crosses 0.5), and scripted
+JS output via `engine.makeConnection(group, "file_bpm", cb)` for the
+continuous case (BPM, scaled 60–200 → 0–127 CC). Listen on the same
+IAC bus we use for sending.
+
+**Why this shape.**
+- Zero new dependencies — we already had `python-rtmidi` for the send
+  side; the input side is one extra port open.
+- Symmetrical with the send-side architecture — Mixxx mapping XML is
+  the single source of truth for the wire format in both directions.
+- Bypasses the Mixxx 2.5 HTTP API limitation entirely; same code
+  pattern would work for Mixxx 2.6+, Traktor, Serato, etc.
+
+**Subtlety: the request-state handshake.** `makeConnection` fires
+*once* on initial connect with the current value, but only when the
+mapping is loaded (not when Python connects). So if Python opens the
+input port *after* Mixxx's mapping already loaded, it sees no initial
+BPM — only future changes. Fix: a `requestState` script-binding
+(note 0x7F) that Python fires once on startup; JS re-broadcasts
+current play state + BPM. Without this, the sidebar would render
+"BPM: —" until the user did something in Mixxx.
+
+**Status.** Active. Becomes the substrate for Thread 4 (agent layer)
+since beat-aware scheduling needs current BPM + playhead position.
+
+---
+
+## D-015 · Library-aware LLM, but LoadTrack is a SUGGESTION, not auto-load
+**Date:** 2026-05-22 · **Commit:** `9854fba`
+
+**Context.** Session 3's goal was library awareness: the LLM picks
+tracks by artist/genre/BPM/vibe and loads them onto a deck. The first
+spec said `MidiAdapter` would dispatch `LoadTrack` actions via "a
+Mixxx MIDI binding for 'load selected track to deck N'." That binding
+exists (`[ChannelN].LoadSelectedTrack`) but it loads whatever is
+currently *highlighted* in Mixxx's library pane — there's no
+path-based or library-ID-based load primitive in the controller-
+script API in either Mixxx 2.5 *or* 2.6. The 2.6 changelog and
+control-surface docs were verified — same set of load controls as
+2.5; no new ones.
+
+**Three load paths explored.**
+1. **`open -a Mixxx <file>` (macOS).** Returns exit 0 silently;
+   Mixxx accepts the open event but doesn't load the file. Verified
+   via both `open` and `osascript ... open POSIX file`. Mixxx 2.5
+   only honors openFiles at startup, not for already-running
+   instances.
+2. **Library-navigation hack (MoveTop + N×MoveDown + LoadSelected).**
+   Doable but fragile — any user click in Mixxx's library pane
+   (playlist, search, sort) invalidates the row count. Hard to demo
+   reliably.
+3. **Upgrade to Mixxx 2.6/2.7.** Verified against the 2.6 manual and
+   GitHub changelog: no new load APIs. One-way DB migration risk for
+   zero benefit.
+
+**Decision.** Keep `LoadTrack` as a typed action emitted by the LLM,
+but the executor's adapter raises `LoadTrackSuggestion` carrying the
+resolved `Track`. The dashboard catches that and renders a styled
+"AI suggests for deck N" card with title/artist/BPM/key/genre. The
+rest of the plan does NOT execute (subsequent steps would target an
+unloaded deck and silently misfire). The user loads manually if they
+want to follow the suggestion.
+
+**Trade-off.** Demo is no longer hands-off-Mixxx for library-load
+commands — the user does one drag onto the target deck. For
+bass-swap or EQ commands on already-loaded tracks, it stays fully
+autonomous.
+
+**Why this is the right portfolio answer.** "AI suggests, human
+accepts" is the dominant agent pattern in shipped products (Cursor
+Compose, ChatGPT plugins, Claude Computer Use). Loading a different
+track is a *destructive* action (overwrites the deck's current
+content) — confirmation is product-appropriate, not a regression.
+The interview line: *"I scoped the auto-load when Mixxx's API made it
+infeasible; cutting that and keeping a clean human-in-the-loop
+confirmation is a more honest UX for AI products anyway."*
+
+**Status.** Active. If a future Mixxx version exposes a path-based
+load API, the only change is the `MidiAdapter._dispatch_load_track`
+body — same `LoadTrack` action, same dashboard wiring still works.
+
+---
+
 ## D-014 · Defer FastAPI + React migration (P2)
 **Date:** 2026-05-21
 

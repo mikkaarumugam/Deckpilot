@@ -30,6 +30,39 @@ keystroke. Documented over fixed.
 
 ---
 
+## Streamlit Material icons render as raw text ("keyboard_double_arrow_left")
+**Symptom.** Streamlit's icon glyphs — sidebar collapse arrow, status
+panel chevron, toast icons — render as their ligature *names* in plain
+text instead of glyphs. Especially visible on hover (the sidebar
+collapse button only appears when the cursor hits the sidebar edge).
+
+**Cause.** Our custom CSS used `[class*="st-"] { font-family: 'Inter'
+!important }` to brand the dashboard. That selector matches every
+Streamlit-emitted span — including the `<span data-testid="stIconMaterial"
+class="st-emotion-cache-…">keyboard_double_arrow_left</span>` icon
+spans. The `!important` clobbers Streamlit's `font-family: "Material
+Symbols Rounded"` on those spans, so the browser falls back to Inter,
+which doesn't contain icon glyphs, so the ligature name renders as
+literal text.
+
+**Fix.** Two changes in `CUSTOM_CSS` (app/dashboard.py):
+1. Drop the broad `[class*="st-"]` selector + `!important` from the
+   Inter rule. Set Inter on `html, body, .stApp`, named text
+   containers — let inheritance do the rest.
+2. Explicitly RE-ASSERT the Material Symbols font on `[data-testid=
+   "stIconMaterial"]` (Streamlit's stable selector for all Material
+   icon spans — Emotion CSS class hashes change between builds, so
+   the test-id is the only reliable target).
+
+**Why the obvious selector list failed.** First attempt targeted
+`.material-icons, .material-symbols-rounded, ...` directly. Doesn't
+work — Streamlit applies the font via Emotion's runtime-generated
+classes (not the canonical Material class names), so the icon span
+has class like `st-emotion-cache-1mh5rb` and our rule never matches.
+The DOM inspector showed the stable test-id; that was the unlock.
+
+---
+
 ## Streamlit + rtmidi segfaults on auto-reload
 **Symptom.** Edit a file while Streamlit is running, Streamlit
 auto-reloads, browser shows "Streamlit stopped." Background log has

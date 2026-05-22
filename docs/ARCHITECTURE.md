@@ -171,6 +171,54 @@ Two interfaces share the parser + executor:
 Both go through the same parser facade and executor, so they always
 behave the same with respect to action semantics.
 
+## Library awareness (Session 3)
+
+The LLM parser optionally receives runtime context — a snapshot of
+the Mixxx library and the current deck state — at parse time. With
+that context, it can pick tracks by criteria ("queue a daft punk
+track", "find something around 90 BPM") and reason about which deck
+to use (the one that isn't playing).
+
+```
+deckpilot/library/reader.py
+  LibraryReader        — read-only SQLite access to Mixxx's library DB.
+                         Opens with mode=ro (never immutable=1, so we see
+                         Mixxx's writes). Joins library + track_locations
+                         to expose file paths.
+  Track                — frozen dataclass: id, artist, title, album,
+                         genre, bpm, key, duration, location.
+```
+
+The library snapshot is rendered into the LLM's system prompt by
+`build_system_prompt(library, deck_state)` — one compact line per
+track. The model emits a new `load_track` action carrying a library
+row id; the deterministic Python layer either dispatches it (future)
+or surfaces it as a SUGGESTION (today — see D-015).
+
+## State read-back (Session 2)
+
+Mixxx → Python over the same IAC bus we use for sending. Two channels:
+
+- **Play state.** Standard `<output>` mapping fires when
+  `[ChannelN].play` crosses 0.5; sends note 0x10/0x11.
+- **Canonical BPM.** Scripted JS subscribes to `[ChannelN].file_bpm`
+  via `engine.makeConnection`, scales to a CC value (60–200 BPM →
+  0–127), sends on CC 0x30/0x31. `file_bpm` (not the playback-drift
+  `bpm`) is the canonical BPM that matches the library DB — see D-017.
+
+```
+deckpilot/adapters/midi_feedback.py
+  MixxxFeedback        — opens IAC Bus 1 as MIDI INPUT, parses notes
+                         and CCs on rtmidi's callback thread, maintains
+                         a thread-safe state dict per deck.
+  MixxxState/DeckState — frozen snapshot dataclasses returned from
+                         snapshot().
+```
+
+A request-state handshake (note 0x7F) fires once at MixxxFeedback
+startup so the sidebar gets initial state instead of waiting for
+the next change.
+
 ## Future: agent layer (parked)
 
 The architecture is designed to receive an agentic upgrade without a

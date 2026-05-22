@@ -3,9 +3,9 @@
 Single source of truth for project status. Updated by humans (or future
 Claude) when state changes.
 
-Last updated: **2026-05-20**
+Last updated: **2026-05-22**
 
-## ✅ Shipped (12 commits on `main`)
+## ✅ Shipped
 
 | Milestone | What | Commit |
 |---|---|---|
@@ -21,77 +21,75 @@ Last updated: **2026-05-20**
 | Perf-1 | Haiku model pinned (vs default Sonnet/Opus) | `777abae` |
 | LLM-1 | Prompt fix for deck-default + loop/EQ vocabulary | `b84ec8c` |
 | Perf-2 | 6 new regex rules for common atomic phrasings | `b39d6d6` |
+| Eval-1 | 29-case eval + methodology + analysis (`docs/EVAL.md`) | `3b0620c` |
+| **Lib-1** | **Library reader — read-only Mixxx SQLite access** | `aa07250` |
+| **Lib-2** | **MIDI state read-back: play state + BPM + request handshake** | `e1c3b0e` |
+| **Lib-3** | **Library-aware LLM + LoadTrack suggestion card** | `9854fba` |
+| **UI-fix** | **Restore Material Symbols font (icon-cascade bug)** | `f86efff` |
 
 Functionally end-to-end working: type or speak (via WhisperType) →
-parsed via regex or Haiku → coordinated multi-step plan visible in
-dashboard → executed against Mixxx via MIDI. One-click undo. Queue
-of pending commands. Reset state.
+parsed via regex or Haiku → library-aware multi-step plan visible in
+dashboard with live deck-state read-back → executed against Mixxx via
+MIDI. One-click undo. Queue of pending commands. Reset state. Sidebar
+shows live "Deck N · ▶/⏸ · 121.7 BPM · Daft Punk — Around the World".
+Track suggestions surfaced when LLM picks library content.
 
 ## 🔜 Next session(s) — in priority order
 
-### 1. UI redesign sketch (~30 min discussion, then 1-2h build)
-Current Streamlit dashboard grew organically and now feels cramped.
-Options to consider:
-- **2-column layout** — input + queue on left, status + history on right
-- **Tabs** — Live / Queue / History
-- **Single-column with stronger visual hierarchy** — bigger input as
-  hero, presets de-emphasized, history collapsed by default
-- **Move off Streamlit** to FastAPI + HTML/JS (2-3h migration, full
-  design freedom)
+### 1. Demo video (60-90s)
+The single most impactful remaining artifact. Screen recording of the
+dashboard. Audio through Mac speakers picked up by phone or built-in
+mic. Suggested flow:
+- `play deck 1` — show regex fast-path (⚡ 0.00s)
+- `kill the bass on deck 1` — same path, more interesting verbs
+- `find me a chill track around 90 bpm` — surfaces suggestion card
+  (library-aware reasoning visible)
+- *(user drags suggested track onto deck 2)*
+- `bass swap into deck 2 over 4 seconds` — multi-step plan visible,
+  fires the 6-step transition
 
-User flagged this — `agent` to come back with 2-3 mockups for comparison.
-
-### 2. Thread 4: the agent question
-Where today's work compounds. Concepts to expand:
-- **Beat-aware scheduling** — "in 8 beats, bass swap into deck 2" requires
-  knowing where the beat is. Either: read Mixxx state via MIDI feedback,
-  or use Mixxx's HTTP API, or use BPM + clock arithmetic from a known
-  anchor.
-- **State read-back** — currently fire-and-forget. Agent needs to know
-  what's playing, where in the track, what the BPM is, what the
-  crossfader is at.
-- **Goal-directed planning** — instead of "do a bass swap into deck 2",
-  the user says "transition to deck 2 in the next 16 bars" and the system
-  plans the moves itself.
-- **Recovery and re-planning** — if something fails mid-plan (track ran
-  out, beat-grid drift), agent should adapt.
-
-This is the conceptually richest thread. Deserves fresh energy and
-probably its own session.
-
-### 3. EVAL.md (~2h, the AI PM money-shot)
-The single highest-leverage artifact for the portfolio. Plan:
-- Hand-write ~30 NL prompts covering: canonical commands, paraphrases,
-  multi-step plans, intentional out-of-vocabulary
-- Hand-label each with expected ActionPlan
-- Run the parser on each, measure accuracy + parse latency + (regex vs LLM) source
-- Categorize failures: paraphrase robustness, numeric ambiguity,
-  implicit deck reference, out-of-vocabulary refusal
-- Write the prose around the numbers explaining what was measured and
-  what we'd do about each failure mode
-
-### 4. Demo video (60-90s)
-After UI redesign + eval. Screen recording of the dashboard. Audio
-through Mac speakers picked up by phone or built-in mic. Run 4-5
-commands ending with "do a bass swap then loop deck 1 for 8 beats"
-as the wow moment.
-
-### 5. README polish + GitHub push
-Final pass on README pitch, link demo video, link EVAL.md. Push to
+### 2. README polish + GitHub push
+Update README to reflect current architecture (library awareness, live
+state, suggestion card). Link demo video. Link EVAL.md. Push to
 GitHub. Add to portfolio.
+
+### 3. Extend EVAL.md with library-aware cases (~1h)
+Current eval: 29 cases on non-library prompts. Add ~10 library cases:
+- "queue a daft punk track" → expect LoadTrack with a Daft Punk id
+- "find something around X BPM" → expect LoadTrack with BPM-matched id
+- "load a chill track" → expect LoadTrack with low-BPM pick
+- Edge: empty library → expect decline with reasoning
+- Edge: ambiguous criteria → expect either decline or principled pick
+
+### 4. Thread 4: the agent layer (parked)
+Now newly substrate-ready thanks to Lib-2 (state read-back). Concepts:
+- **Beat-aware scheduling** — "in 8 beats, bass swap into deck 2"
+- **Goal-directed planning** — "transition to deck 2 in the next 16 bars"
+- **Recovery + re-planning** — track ran out, beat-grid drift
+
+Was the biggest pending direction before Library awareness shipped.
+Now even more interesting — Sessions 1-3 give an agent state visibility
++ content choice. The remaining gap is musical-time scheduling +
+goal-directed planning.
+
+### 5. UI redesign sketch (deferred; see D-014)
+Streamlit ceiling is real. FastAPI + React/Tailwind would deliver
+polished animations + pixel-perfect chrome. ~4h migration. Listed
+in DECISIONS as P2.
 
 ## 🪦 Deferred / explicitly out of scope
 
 | Idea | Why deferred |
 |---|---|
+| **Auto-load tracks onto a Mixxx deck** | Verified against Mixxx 2.5 + 2.6 + 2.7-alpha: no controller-script or HTTP API for path-based load (only UI-selected). `open -a Mixxx <file>` is ignored by an already-running instance. See D-015 — we ship LoadTrack as a SUGGESTION instead. Drop-in upgrade if a future Mixxx exposes the API. |
 | **Mixxx stems** | Stems require Mixxx 2.6+. User has 2.5.6 stable. EQ-based bass swap (D-010) covers the demo. Drop-in upgrade when 2.6 stable lands. |
 | **Bundled voice input (Whisper)** | User uses WhisperType locally; dictates into any focused input. No need to ship it. |
 | **MCP server** | Nice future option but not portfolio-critical. Mentioned in README "what's next". |
-| **State read-back from Mixxx** | Required for Thread 4. Will design once we start that thread. |
 | **Anthropic SDK + prompt caching** | Documented swap path in `llm.py`. Adds metered cost; not needed at single-user scale. |
 | **FastAPI + React/Tailwind rewrite** | Streamlit ceiling reached but EVAL.md is higher-leverage. See D-014. ~4h migration when revisited. |
 | **VirtualDJ Pro HTTP API** | VDJ is paid/throttled. We pivoted away. |
 | **Mobile or web-deployed** | Local-only by design. Portfolio is a desktop demo. |
+| **Library navigation hack for auto-load** | MoveTop + N×MoveDown + LoadSelectedTrack works but is fragile to any user click in Mixxx's library pane. Documented as a hidden fallback, not shipped. See D-015. |
 
 ## 🐛 Known limitations (will surface in EVAL.md)
 
