@@ -60,9 +60,42 @@ CUSTOM_CSS = """
 <style>
 /* --- Google Fonts --- */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+/* Material Symbols — Streamlit's icon font. Explicitly imported so it
+   doesn't rely on Streamlit's bundled copy being served correctly, and so
+   our restore rule below has a guaranteed font to fall back on. */
+@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded&family=Material+Symbols+Outlined&display=swap');
 
-html, body, [class*="st-"], button, input, textarea, p, span, div {
-    font-family: 'Inter', system-ui, -apple-system, sans-serif !important;
+/* Inter as default text font via body (inherits everywhere) and a few
+   explicit Streamlit text containers. No !important so the icon rule
+   below can win on icon spans. */
+html, body, .stApp,
+[data-testid="stAppViewContainer"],
+[data-testid="stSidebar"],
+[data-testid="stMarkdown"],
+[data-testid="stMarkdown"] p,
+[data-testid="stMarkdown"] li,
+[data-testid="stMarkdown"] td,
+[data-testid="stTextInput"] input,
+[data-testid="stCaptionContainer"] {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+/* RESTORE the Material Symbols font for Streamlit's icon spans.
+   The stable selector is `data-testid="stIconMaterial"` — Streamlit puts
+   it on every Material-icon span (sidebar collapse, status chevrons,
+   toast icons, etc.). Without this rule, our body Inter cascades down
+   and the icon NAMES render as plain text ("keyboard_double_arrow_left",
+   "arrow_drop_down"). The Emotion class hashes (st-emotion-cache-...)
+   change between Streamlit builds, so we target the test-id only. */
+[data-testid="stIconMaterial"],
+.material-icons,
+.material-symbols-rounded,
+.material-symbols-outlined {
+    font-family: "Material Symbols Rounded", "Material Symbols Outlined",
+                 "Material Icons" !important;
+    font-feature-settings: "liga" !important;
+    /* ligatures = the mechanism that turns the icon NAME into the glyph */
+    -webkit-font-smoothing: antialiased !important;
 }
 
 /* --- Code / inline `` blocks: use JetBrains Mono and a subtle dark chip --- */
