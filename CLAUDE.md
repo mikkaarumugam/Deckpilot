@@ -48,16 +48,20 @@ deckpilot/
 ├── adapters/
 │   ├── base.py             ← Adapter interface
 │   ├── midi.py             ← MidiAdapter (python-rtmidi → IAC Driver)
+│   ├── midi_feedback.py    ← MixxxFeedback (Mixxx → Python state read-back)
 │   └── mappings/
-│       ├── mixxx.midi.xml  ← Mixxx-side bindings (note/CC → control)
-│       └── mixxx.midi.js   ← JS handlers for play/pause (script bindings)
+│       ├── mixxx.midi.xml  ← Mixxx-side bindings + outputs (note/CC ↔ control)
+│       └── mixxx.midi.js   ← JS handlers: play/pause + scripted BPM output
+├── library/
+│   ├── __init__.py         ← exports LibraryReader, Track
+│   └── reader.py           ← read-only Mixxx SQLite library access
 ├── __main__.py             ← CLI entry. Subcommands OR NL string.
 
 app/dashboard.py            ← Streamlit frontend
 scripts/send_test_note.py   ← Sanity test: Python → IAC → Mixxx
 tests/test_parser.py        ← 47 parametrized tests for regex
-tests/eval.py               ← placeholder for M4
-docs/                       ← ARCHITECTURE, DECISIONS, ROADMAP, GOTCHAS, EVAL
+tests/eval.py               ← the eval harness backing docs/EVAL.md
+docs/                       ← ARCHITECTURE, DECISIONS, ROADMAP, GOTCHAS, EVAL, …
 ```
 
 ## How to run things
