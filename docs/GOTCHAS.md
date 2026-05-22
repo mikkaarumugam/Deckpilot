@@ -5,6 +5,48 @@ future you (or future Claude) doesn't pay it again. Newest first.
 
 ---
 
+## Mixxx caches analysed BPM in RAM; library DB lags until a clean quit
+**Symptom.** A track shows e.g. 90.6 BPM in Mixxx's library UI, but
+`SELECT bpm FROM library WHERE id=...` returns `0.0`. DeckPilot's
+sidebar shows "(not in library)" or "(BPM not yet analysed)" for a
+track Mixxx clearly identified.
+
+**Cause.** Mixxx analyses BPM on track load and shows the result in the
+UI immediately, but doesn't always flush the summary `bpm` column to
+the SQLite library DB until Mixxx exits cleanly. The detailed beat data
+lands in the binary `beats` column sooner, but our reader uses the
+plain `bpm` column.
+
+**Fix.** Quit Mixxx (Cmd+Q) and reopen. Clean shutdown persists all
+analysis; on reopen, `library.bpm` is populated and DeckPilot's lookup
+resolves the track. Alternatively right-click → "Reanalyze" in Mixxx
+forces a per-track write.
+
+**Why we don't engineer around it.** The fixes (read ID3 from the
+audio file via `mutagen`, or parse Mixxx's protobuf `beats` blob) both
+violate the "minimal deps" project rule. The user-facing
+"(BPM not yet analysed)" message is honest, and quitting Mixxx is one
+keystroke. Documented over fixed.
+
+---
+
+## Streamlit + rtmidi segfaults on auto-reload
+**Symptom.** Edit a file while Streamlit is running, Streamlit
+auto-reloads, browser shows "Streamlit stopped." Background log has
+`Segmentation fault: 11` and no Python traceback.
+
+**Cause.** rtmidi's MidiIn callback runs on a native thread. When
+Streamlit reloads, Python tears down state but the rtmidi callback
+thread can still fire — referencing freed memory.
+
+**Fix.** In `MixxxFeedback.stop()`, call `cancel_callback()` BEFORE
+`close_port()` to close the race window. Also register `stop` with
+`atexit` so the port closes cleanly on Python process exit. Cold-
+restart Streamlit if the segfault has already happened — the OS may
+hold the IAC port for a few seconds afterward.
+
+---
+
 ## VirtualDJ Home throttles MIDI controllers to 10 minutes/launch
 **Symptom.** VDJ shows "Activity" in the IAC Driver controllers panel
 (it's receiving the MIDI) but actions silently no-op. No error, no

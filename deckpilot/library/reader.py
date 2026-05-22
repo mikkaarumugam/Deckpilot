@@ -90,11 +90,12 @@ class LibraryReader:
             )
 
     def _connect(self) -> sqlite3.Connection:
-        # URI form lets us pass mode=ro (read-only) + immutable=1 (assume
-        # the DB won't change under us — speeds up queries; safe because
-        # we open per-call and Mixxx writes are infrequent for a portfolio
-        # demo).
-        uri = f"file:{self._db_path}?mode=ro&immutable=1"
+        # mode=ro: never allow writes — protects Mixxx's live library.
+        # We deliberately do NOT use immutable=1 here: Mixxx adds new
+        # tracks while running, and immutable=1 caches the DB state on
+        # first open so new rows would never appear. Reopening per query
+        # gives us a fresh view every time.
+        uri = f"file:{self._db_path}?mode=ro"
         return sqlite3.connect(uri, uri=True)
 
     def _query(self, where: str = "", params: tuple = ()) -> list[Track]:

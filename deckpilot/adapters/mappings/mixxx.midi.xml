@@ -251,7 +251,52 @@ Binding modes:
                 <options><normal/></options>
             </control>
 
+            <!-- =================================================================== -->
+            <!-- Request-state handshake (note 0x7F = 127).
+                 Python's MixxxFeedback sends this once on startup; the JS handler
+                 re-broadcasts current play state + BPM for both decks so the
+                 listener gets a fresh snapshot instead of waiting for the next
+                 user-driven change in Mixxx. -->
+            <!-- =================================================================== -->
+            <control>
+                <group>[Master]</group>
+                <key>DeckPilot.requestState</key>
+                <status>0x90</status><midino>0x7F</midino>
+                <options><script-binding/></options>
+            </control>
+
         </controls>
-        <outputs/>
+
+        <!-- =================================================================== -->
+        <!-- OUTPUTS — Mixxx → Python. Lets DeckPilot see what's happening
+             without re-asking Mixxx. Listener: deckpilot/adapters/midi_feedback.py.
+
+             Play state goes through standard <output> bindings (binary, fires
+             when the watched value crosses <minimum>). BPM is continuous and
+             needs scaled output, so it's emitted from DeckPilot.midi.js via
+             engine.makeConnection — see that file's init().
+
+             Numbering keeps outputs in their own band so we can sniff the wire
+             without confusion:
+               - Play state notes: 0x10 (deck 1), 0x11 (deck 2)
+               - BPM CCs:          0x30 (deck 1), 0x31 (deck 2)  (sent from JS)
+             Send-side bindings (above) start at 0x14 / 0x3C — no collision. -->
+        <!-- =================================================================== -->
+        <outputs>
+            <output>
+                <group>[Channel1]</group>
+                <key>play</key>
+                <status>0x90</status><midino>0x10</midino>
+                <on>0x7F</on><off>0x00</off>
+                <minimum>0.5</minimum>
+            </output>
+            <output>
+                <group>[Channel2]</group>
+                <key>play</key>
+                <status>0x90</status><midino>0x11</midino>
+                <on>0x7F</on><off>0x00</off>
+                <minimum>0.5</minimum>
+            </output>
+        </outputs>
     </controller>
 </MixxxControllerPreset>

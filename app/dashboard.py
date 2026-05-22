@@ -31,12 +31,14 @@ from typing import Any
 import streamlit as st
 
 from deckpilot.adapters.midi import MidiAdapter
+from deckpilot.adapters.midi_feedback import MixxxFeedback
 from deckpilot.core.actions import ActionPlan
 from deckpilot.core.executor import Executor
 from deckpilot.core.parser import parse as facade_parse
 from deckpilot.core.parser import regex as regex_parser
 from deckpilot.core.parser.errors import ParseError
 from deckpilot.core.undo import inverse_plan, reset_plan
+from deckpilot.library import LibraryReader, Track
 
 
 PRESETS = [
@@ -217,6 +219,53 @@ def get_executor() -> Executor:
     return st.session_state.executor
 
 
+def get_feedback() -> MixxxFeedback | None:
+    """Singleton MixxxFeedback. Returns None (and remembers the failure)
+    if the IAC input port isn't available — keeps the dashboard usable
+    even when Mixxx isn't running."""
+    if "feedback" in st.session_state:
+        return st.session_state.feedback
+    if st.session_state.get("feedback_failed"):
+        return None
+    try:
+        st.session_state.feedback = MixxxFeedback().start()
+    except Exception as exc:
+        st.session_state.feedback_failed = str(exc)
+        return None
+    return st.session_state.feedback
+
+
+def get_library() -> LibraryReader | None:
+    """Singleton LibraryReader. None if the Mixxx DB isn't found."""
+    if "library" in st.session_state:
+        return st.session_state.library
+    if st.session_state.get("library_failed"):
+        return None
+    try:
+        st.session_state.library = LibraryReader()
+    except Exception as exc:
+        st.session_state.library_failed = str(exc)
+        return None
+    return st.session_state.library
+
+
+# BPM tolerance for library lookup. The 7-bit CC encoding of BPM
+# introduces ~0.5 BPM round-trip error (140 BPM range / 127 steps =
+# 1.1 BPM per step, ±0.55 BPM each side). 0.6 stays inside one step so
+# adjacent CC values don't both match the same library track.
+_BPM_MATCH_TOLERANCE = 0.6
+
+
+def _match_track(library: LibraryReader, bpm: float) -> Track | None:
+    """Find the unique library track at this BPM. Returns None if zero
+    or multiple matches — honest about ambiguity instead of guessing."""
+    if bpm <= 0:
+        return None
+    candidates = library.find_by_bpm(bpm - _BPM_MATCH_TOLERANCE,
+                                     bpm + _BPM_MATCH_TOLERANCE)
+    return candidates[0] if len(candidates) == 1 else None
+
+
 def init_state() -> None:
     st.session_state.setdefault("history", [])
     st.session_state.setdefault("queue", [])
@@ -363,6 +412,63 @@ def _trigger_clear_history() -> None:
 # Sidebar
 # ---------------------------------------------------------------------------
 
+@st.fragment(run_every="1s")
+def _render_deck_state_fragment() -> None:
+    """Live deck state, refreshed once per second via st.fragment.
+
+    A fragment re-runs in isolation — the rest of the page stays put.
+    That lets us poll MixxxFeedback at 1Hz without rebuilding the form,
+    queue, or history every tick.
+
+    Track identity comes from a BPM lookup against the library DB. MIDI
+    can't carry the title string (no JS API for track metadata in Mixxx
+    controller scripts), so we match the live BPM against
+    `library.bpm`. Unambiguous in this library; if multiple tracks
+    shared a BPM the lookup would return None instead of guessing.
+    """
+    fb = get_feedback()
+    if fb is None:
+        err = st.session_state.get("feedback_failed", "unknown error")
+        st.caption(f"⚠️ Feedback unavailable: {err}")
+        return
+
+    library = get_library()
+    snap = fb.snapshot()
+    for n in (1, 2):
+        d = snap.deck(n)
+        icon = "▶︎" if d.playing else "⏸"
+        bpm_text = f"{d.bpm:.1f} BPM" if d.bpm > 0 else "—"
+
+        # Library lookup. Falls back gracefully if the DB isn't reachable.
+        track = _match_track(library, d.bpm) if library is not None else None
+        if track is not None:
+            # YouTube-DL titles already embed the artist; show the title
+            # alone to avoid "Artist — Artist - Title" duplication.
+            track_label = track.title or f"{track.artist} — (untitled)"
+        elif d.bpm > 0:
+            # Got a BPM, no library match — could be a track loaded from
+            # outside the library, or a library track at an ambiguous BPM.
+            track_label = "(not in library)"
+        else:
+            # file_bpm = 0 means the track hasn't been analysed yet (or
+            # no track is loaded). Right-click → Analyze in Mixxx to fix.
+            track_label = "(BPM not yet analysed)"
+
+        st.markdown(
+            f"<div style='margin-bottom: 0.7rem;'>"
+            f"<div style='font-weight:600;color:#e4e4e7'>Deck {n}  "
+            f"<span style='color:{'#34d399' if d.playing else '#8b8b96'};font-weight:500'>"
+            f"{icon}</span>  "
+            f"<code style='font-size:0.78em'>{bpm_text}</code>"
+            f"</div>"
+            f"<div style='color:#a1a1aa;font-size:0.82em;margin-top:2px;"
+            f"max-width:100%;overflow:hidden;text-overflow:ellipsis;"
+            f"white-space:nowrap'>{track_label}</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+
 def render_sidebar() -> str | None:
     """Build sidebar widgets. Return a preset's text if one was clicked."""
     preset_clicked: str | None = None
@@ -370,6 +476,12 @@ def render_sidebar() -> str | None:
     with st.sidebar:
         st.title("🎚️ DeckPilot")
         st.caption("Natural-language Mixxx control")
+
+        st.divider()
+
+        # --- Live deck state (Session 2 — Mixxx → Python read-back) ---
+        st.markdown("**🎧 Live state**")
+        _render_deck_state_fragment()
 
         st.divider()
 
