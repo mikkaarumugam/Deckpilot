@@ -22,7 +22,7 @@ from fastapi import APIRouter
 
 from deckpilot.adapters.midi import LoadTrackSuggestion
 from deckpilot.core.actions import ActionPlan, DJAction, LoadTrack
-from deckpilot.core.agent import AgentSchedule, DeckPosition, Immediate
+from deckpilot.core.agent import AfterBeats, AgentSchedule, DeckPosition, Immediate
 from deckpilot.core.parser import parse as facade_parse
 from deckpilot.core.parser.errors import ParseError
 from deckpilot.core.parser.regex import parse as regex_parse
@@ -106,6 +106,12 @@ def schedule_to_payloads(schedule: AgentSchedule) -> list[ScheduledPlanPayload]:
                 type="deck_position",
                 deck=step.trigger.deck,
                 at=step.trigger.at,
+            )
+        elif isinstance(step.trigger, AfterBeats):
+            trig = TriggerPayload(
+                type="after_beats",
+                deck=step.trigger.deck,
+                count=step.trigger.count,
             )
         else:
             raise TypeError(f"unknown trigger: {step.trigger!r}")

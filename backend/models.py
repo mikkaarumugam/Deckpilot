@@ -58,6 +58,11 @@ class DeckStatePayload(BaseModel):
     bpm: float
     track: TrackPayload | None = None
     progress: ProgressPayload = Field(default_factory=ProgressPayload)
+    # Monotonic beat counter from MixxxFeedback (one tick per `beat_active`
+    # rising edge). Frontend uses this for the agent queue's beat
+    # countdown — sees that the deck is "alive" beat-wise even when no
+    # schedule is running. Defaults to 0 when feedback is unavailable.
+    beat_count: int = 0
 
 
 class StateResponse(BaseModel):
@@ -183,12 +188,17 @@ class UndoResponse(BaseModel):
 
 
 class TriggerPayload(BaseModel):
-    """Wire format for a trigger. `type` is the discriminator; deck/at
-    are populated only when type == 'deck_position'."""
+    """Wire format for a trigger. `type` is the discriminator:
+      - immediate     → no extra fields
+      - deck_position → deck + at (0..1)
+      - after_beats   → deck + count (≥1, beats from when the step
+                        became pending; see D-023)
+    """
 
-    type: Literal["immediate", "deck_position"]
+    type: Literal["immediate", "deck_position", "after_beats"]
     deck: int | None = None
     at: float | None = None
+    count: int | None = None
 
 
 class ScheduledPlanPayload(BaseModel):
@@ -207,9 +217,15 @@ class AgentStepStatus(BaseModel):
     """One row in the /agent/state response — what the UI's queue shows."""
 
     label: str
-    trigger_kind: Literal["immediate", "deck_position"]
+    trigger_kind: Literal["immediate", "deck_position", "after_beats"]
     trigger_deck: int | None = None
     trigger_at: float | None = None
+    # For after_beats: total beats requested + how many are still to go.
+    # remaining_count is computed server-side using the per-step baseline
+    # so the UI doesn't need access to the snapshot; once the step is
+    # running/done it's None.
+    trigger_count: int | None = None
+    remaining_count: int | None = None
     status: Literal["done", "running", "pending"]
 
 

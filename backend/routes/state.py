@@ -48,8 +48,8 @@ def state() -> StateResponse:
     if feedback is None:
         return StateResponse(
             decks=[
-                DeckStatePayload(n=1, status="cued", bpm=0.0),
-                DeckStatePayload(n=2, status="cued", bpm=0.0),
+                DeckStatePayload(n=1, status="cued", bpm=0.0, beat_count=0),
+                DeckStatePayload(n=2, status="cued", bpm=0.0, beat_count=0),
             ],
         )
 
@@ -101,6 +101,7 @@ def state() -> StateResponse:
                 bpm=d.bpm,
                 track=track_payload,
                 progress=progress,
+                beat_count=d.beat_count,
             )
         )
         bpms.append(d.bpm)

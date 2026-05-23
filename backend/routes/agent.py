@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException
 
 from deckpilot.core.actions import ActionPlan, TimedAction
 from deckpilot.core.agent import (
+    AfterBeats,
     AgentSchedule,
     DeckPosition,
     Immediate,
@@ -49,6 +50,18 @@ def _wire_trigger_to_core(p: TriggerPayload) -> Trigger:
                 detail=f"deck_position trigger requires at in 0..1; got {p.at}",
             )
         return DeckPosition(deck=p.deck, at=p.at)
+    if p.type == "after_beats":
+        if p.deck not in (1, 2):
+            raise HTTPException(
+                status_code=422,
+                detail=f"after_beats trigger requires deck in (1,2); got {p.deck}",
+            )
+        if p.count is None or not 1 <= p.count <= 256:
+            raise HTTPException(
+                status_code=422,
+                detail=f"after_beats trigger requires count in 1..256; got {p.count}",
+            )
+        return AfterBeats(deck=p.deck, count=p.count)
     raise HTTPException(status_code=422, detail=f"unknown trigger type {p.type!r}")
 
 
@@ -119,6 +132,8 @@ def agent_state() -> AgentStateResponse:
                 trigger_kind=s.trigger_kind,  # type: ignore[arg-type]
                 trigger_deck=s.trigger_deck,
                 trigger_at=s.trigger_at,
+                trigger_count=s.trigger_count,
+                remaining_count=s.remaining_count,
                 status=s.status,  # type: ignore[arg-type]
             )
             for s in snap.steps

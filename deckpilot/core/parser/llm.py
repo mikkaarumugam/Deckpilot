@@ -40,6 +40,7 @@ from deckpilot.core.actions import (
     TimedAction,
 )
 from deckpilot.core.agent import (
+    AfterBeats,
     AgentSchedule,
     DeckPosition,
     Immediate,
@@ -256,6 +257,11 @@ Goal-style prompts (autonomous schedules):
     - {"type": "deck_position", "deck": N, "at": 0.92} — fires when
       that deck's playhead is ≥ the fraction. Use at=0.92 for
       "near end"; at=0.5 for "midway"; etc.
+    - {"type": "after_beats", "deck": N, "count": K} — fires K beats
+      after the previous step finished, counted on deck N (so it
+      pauses if that deck pauses). Use this when the user says "in
+      N beats / bars" — convert bars to beats (4 beats/bar) so "in
+      4 bars" → count=16. Reasonable range: 1..256.
 - Each schedule step's `plan` follows the same TimedAction shape as
   normal plans — load_track, play_deck, set_eq, fade_to_deck, etc.
 - Keep schedules SHORT (2-3 steps) for the demo: an immediate kickoff
@@ -268,7 +274,24 @@ Goal-style prompts (autonomous schedules):
   emit a regular {"plan":[...]} — don't wrap simple commands in a
   schedule.
 
-SCHEDULE example:
+SCHEDULE example (after_beats — musical-time trigger):
+"play deck 1, then in 16 beats bass swap into deck 2 over 4 seconds"
+-> {
+  "schedule": [
+    {"trigger": {"type":"immediate"}, "label":"play deck 1",
+     "plan": [{"at":0,"action":"play_deck","deck":1}]},
+    {"trigger": {"type":"after_beats","deck":1,"count":16}, "label":"bass swap into deck 2",
+     "plan": [{"at":0,"action":"sync","deck":2},
+              {"at":0,"action":"set_eq","deck":2,"band":"low","value":0.0},
+              {"at":0,"action":"play_deck","deck":2},
+              {"at":0,"action":"fade_to_deck","deck":2,"seconds":4},
+              {"at":2,"action":"set_eq","deck":1,"band":"low","value":0.0},
+              {"at":4,"action":"set_eq","deck":2,"band":"low","value":1.0}]}
+  ],
+  "reasoning":"16 beats ≈ 4 bars at standard 4/4; gives the listener a phrase before the transition"
+}
+
+SCHEDULE example (deck_position — position-based trigger):
 "play berlioz on deck 1 then auto-transition into highjack when berlioz is near end, bass swap over 8 seconds"
 -> {
   "schedule": [
@@ -455,6 +478,19 @@ def _payload_to_trigger(payload: dict[str, Any]) -> Trigger:
         if not isinstance(at, (int, float)) or not 0.0 <= float(at) <= 1.0:
             raise LLMParseError(f"deck_position trigger: at must be in 0..1, got {at!r}")
         return DeckPosition(deck=int(deck), at=float(at))
+    if kind == "after_beats":
+        deck = payload.get("deck")
+        count = payload.get("count")
+        if deck not in (1, 2):
+            raise LLMParseError(f"after_beats trigger: deck must be 1 or 2, got {deck!r}")
+        # Sanity-cap count at 256 — that's a full 64-bar phrase, way more
+        # than any realistic DJ transition. Below 1 makes no musical
+        # sense (the user would have said "now" instead).
+        if not isinstance(count, int) or not 1 <= count <= 256:
+            raise LLMParseError(
+                f"after_beats trigger: count must be int in 1..256, got {count!r}"
+            )
+        return AfterBeats(deck=int(deck), count=int(count))
     raise LLMParseError(f"unknown trigger type: {kind!r}")
 
 

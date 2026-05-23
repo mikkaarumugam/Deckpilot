@@ -21,12 +21,19 @@ ScheduledPlans, checks each step's trigger against the live Mixxx
 state, and runs the plan when the condition fires.
 
 Demo-scope decisions:
-- ONLY two trigger types. Beat-aware triggers (e.g. "in 8 bars") would
-  need beat-grid read-back; deferred to v0.3.
+- THREE trigger types now (Immediate, DeckPosition, AfterBeats — D-023
+  added beat-aware. Recovery / re-planning + nesting still parked.)
 - No recovery / re-planning. If the LLM emits a schedule with bad
   assumptions (wrong track BPM, etc.), the user cancels and re-prompts.
 - No nesting. A ScheduledPlan's plan is a flat ActionPlan, not another
   schedule. Keep the model dumb for now.
+
+Trigger interface:
+  fires(state, baseline=None) -> bool
+where `state` is the live MixxxState snapshot and `baseline` is the
+state captured the first time this step's trigger was checked. Stateful
+triggers (AfterBeats) use the baseline to compute deltas; stateless
+triggers (Immediate, DeckPosition) accept and ignore it.
 """
 
 from __future__ import annotations
@@ -47,7 +54,11 @@ if TYPE_CHECKING:
 class Immediate:
     """Fires the moment the schedule starts. Used for the kickoff step."""
 
-    def fires(self, _state: "MixxxState") -> bool:
+    def fires(
+        self,
+        _state: "MixxxState",
+        _baseline: "MixxxState | None" = None,
+    ) -> bool:
         return True
 
     def describe(self) -> str:
@@ -65,7 +76,11 @@ class DeckPosition:
     deck: int
     at: float
 
-    def fires(self, state: "MixxxState") -> bool:
+    def fires(
+        self,
+        state: "MixxxState",
+        _baseline: "MixxxState | None" = None,
+    ) -> bool:
         return state.deck(self.deck).position >= self.at
 
     def describe(self) -> str:
@@ -73,7 +88,44 @@ class DeckPosition:
         return f"deck {self.deck} reaches {int(self.at * 100)}%"
 
 
-Trigger = Union[Immediate, DeckPosition]
+@dataclass(frozen=True)
+class AfterBeats:
+    """Fires `count` beats after this step became pending (D-023).
+
+    Stateful in the sense that "5 beats from now" needs a starting
+    point. The runtime captures a MixxxState baseline the first time
+    this trigger is checked and passes it back in on every poll; the
+    trigger itself stays a frozen dataclass.
+
+    deck:  which deck's beats to count (1 or 2). Mixxx only fires
+           `beat_active` while a track is playing on that deck — if
+           the deck pauses mid-wait, the count pauses with it. That's
+           the right behaviour for "in 4 beats" intents: count to 4
+           musical beats, not 4 seconds.
+    count: number of beats to wait. ≥1.
+    """
+
+    deck: int
+    count: int
+
+    def fires(
+        self,
+        state: "MixxxState",
+        baseline: "MixxxState | None" = None,
+    ) -> bool:
+        # Without a baseline we can't compute the delta. The runtime
+        # always provides one in practice; the None case is a
+        # belt-and-suspenders guard for unit tests / mis-use.
+        if baseline is None:
+            return False
+        elapsed = state.deck(self.deck).beat_count - baseline.deck(self.deck).beat_count
+        return elapsed >= self.count
+
+    def describe(self) -> str:
+        return f"deck {self.deck} reaches +{self.count} beats"
+
+
+Trigger = Union[Immediate, DeckPosition, AfterBeats]
 
 
 # ── Schedule shapes ───────────────────────────────────────────────────

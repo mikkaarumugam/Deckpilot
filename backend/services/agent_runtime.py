@@ -31,6 +31,7 @@ from typing import Optional
 from deckpilot.adapters.midi_feedback import MixxxState
 from deckpilot.core.actions import ActionPlan
 from deckpilot.core.agent import (
+    AfterBeats,
     AgentSchedule,
     DeckPosition,
     Immediate,
@@ -51,9 +52,11 @@ class _PublicStepStatus:
     """One row in the /agent/state response."""
 
     label: str
-    trigger_kind: str           # "immediate" | "deck_position"
-    trigger_deck: Optional[int] # set when trigger_kind == "deck_position"
-    trigger_at: Optional[float] # set when trigger_kind == "deck_position"
+    trigger_kind: str           # "immediate" | "deck_position" | "after_beats"
+    trigger_deck: Optional[int] # populated for deck_position + after_beats
+    trigger_at: Optional[float] # populated for deck_position
+    trigger_count: Optional[int]   # populated for after_beats (total beats)
+    remaining_count: Optional[int] # populated for after_beats (beats to go)
     status: str                 # "done" | "running" | "pending"
 
 
@@ -67,12 +70,17 @@ class AgentStateSnapshot:
     steps: tuple[_PublicStepStatus, ...]
 
 
-def _trigger_kind(t: Trigger) -> tuple[str, Optional[int], Optional[float]]:
-    """Reduce a Trigger to its wire-format tuple."""
+def _trigger_kind(
+    t: Trigger,
+) -> tuple[str, Optional[int], Optional[float], Optional[int]]:
+    """Reduce a Trigger to its wire-format tuple
+    (kind, deck, at, count)."""
     if isinstance(t, Immediate):
-        return ("immediate", None, None)
+        return ("immediate", None, None, None)
     if isinstance(t, DeckPosition):
-        return ("deck_position", t.deck, t.at)
+        return ("deck_position", t.deck, t.at, None)
+    if isinstance(t, AfterBeats):
+        return ("after_beats", t.deck, None, t.count)
     raise TypeError(f"unknown trigger: {t!r}")
 
 
@@ -91,6 +99,14 @@ class AgentRuntime:
         self._currently_running: Optional[int] = None
         self._task: Optional[asyncio.Task] = None
         self._lock = asyncio.Lock()
+        # Per-step baseline snapshot. AfterBeats triggers need to know
+        # "what was the beat counter when this step BECAME PENDING" —
+        # snapshotted on the first poll where the step is current, reused
+        # on every subsequent poll until it fires or the cursor advances.
+        # Keyed by cursor index so the snapshot stays correct even if
+        # the runtime restarts a step (it doesn't today, but the keying
+        # is the safer invariant).
+        self._step_baselines: dict[int, MixxxState] = {}
 
     # ── public API ────────────────────────────────────────────────────
 
@@ -101,6 +117,7 @@ class AgentRuntime:
             self._cursor = 0
             self._started_at = time.time()
             self._currently_running = None
+            self._step_baselines.clear()
         if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._loop())
 
@@ -110,6 +127,7 @@ class AgentRuntime:
             self._cursor = 0
             self._started_at = None
             self._currently_running = None
+            self._step_baselines.clear()
         # We DON'T cancel the task itself — it'll see schedule=None on
         # its next tick and idle. Avoids the "task cancelled mid-MIDI"
         # failure mode.
@@ -122,20 +140,30 @@ class AgentRuntime:
             return AgentStateSnapshot(active=False, started_at_unix=None, steps=())
 
         rows: list[_PublicStepStatus] = []
+        live = self._snapshot()
         for i, step in enumerate(self._schedule.steps):
-            kind, deck, at = _trigger_kind(step.trigger)
+            kind, deck, at, count = _trigger_kind(step.trigger)
             if i < self._cursor:
                 status = "done"
             elif i == self._currently_running:
                 status = "running"
             else:
                 status = "pending"
+
+            remaining = self._remaining_beats(i, step, live) if (
+                isinstance(step.trigger, AfterBeats)
+                and status == "pending"
+                and live is not None
+            ) else None
+
             rows.append(
                 _PublicStepStatus(
                     label=step.label,
                     trigger_kind=kind,
                     trigger_deck=deck,
                     trigger_at=at,
+                    trigger_count=count,
+                    remaining_count=remaining,
                     status=status,
                 )
             )
@@ -145,6 +173,28 @@ class AgentRuntime:
             started_at_unix=self._started_at,
             steps=tuple(rows),
         )
+
+    def _remaining_beats(
+        self,
+        cursor: int,
+        step: ScheduledPlan,
+        live: MixxxState,
+    ) -> Optional[int]:
+        """How many beats are still to come before this AfterBeats step
+        fires. Used purely for UI countdown — runtime decisions go through
+        Trigger.fires(). None when no baseline exists yet (step hasn't
+        become current) — UI then shows the full requested count."""
+        trigger = step.trigger
+        if not isinstance(trigger, AfterBeats):
+            return None
+        baseline = self._step_baselines.get(cursor)
+        if baseline is None:
+            return trigger.count
+        elapsed = (
+            live.deck(trigger.deck).beat_count
+            - baseline.deck(trigger.deck).beat_count
+        )
+        return max(0, trigger.count - elapsed)
 
     # ── internals ─────────────────────────────────────────────────────
 
@@ -163,6 +213,7 @@ class AgentRuntime:
                     async with self._lock:
                         self._schedule = None
                         self._started_at = None
+                        self._step_baselines.clear()
                     return
 
                 step = schedule.steps[self._cursor]
@@ -173,7 +224,14 @@ class AgentRuntime:
                     # user can cancel from the UI.
                     continue
 
-                if not step.trigger.fires(state):
+                # First time we see this cursor → capture the baseline.
+                # AfterBeats compares against it; other triggers ignore.
+                baseline = self._step_baselines.get(self._cursor)
+                if baseline is None:
+                    baseline = state
+                    self._step_baselines[self._cursor] = baseline
+
+                if not step.trigger.fires(state, baseline):
                     continue
 
                 # Trigger fires — run the bound plan under the lock so
