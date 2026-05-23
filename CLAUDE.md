@@ -3,6 +3,25 @@
 This file is loaded automatically by Claude Code at the start of every
 session in this repo. Read it before doing anything else.
 
+> ## ⚠️ Active migration in progress (2026-05-23 →)
+>
+> A React + FastAPI rewrite is underway on branch `feature/react-frontend`.
+> The full plan, checklist, and resume guide live in
+> [docs/MIGRATION.md](docs/MIGRATION.md). The decision rationale (which
+> supersedes D-014's earlier deferral) is in
+> [docs/DECISIONS.md](docs/DECISIONS.md) § **D-018**.
+>
+> **If you're a fresh session picking this up:**
+> 1. Read `docs/MIGRATION.md` first — it has the six-phase checklist with
+>    `[x]` / `[ ]` markers showing exactly which phase to resume from.
+> 2. The Python brain (`deckpilot/`) is intentionally untouched. The new
+>    code lives in `frontend/` (Vite + React + TS) and `backend/` (FastAPI
+>    wrapping `deckpilot/` via HTTP).
+> 3. Streamlit at `app/dashboard.py` is the working fallback and stays in
+>    place. **Only one Python process can hold the IAC MIDI port at a
+>    time** — quit Streamlit before running FastAPI.
+> 4. Visual reference for the new UI is in `design/` (3 .jsx files).
+
 ## What is DeckPilot
 
 A natural-language control layer for DJ software. You type or speak a

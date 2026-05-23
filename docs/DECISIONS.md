@@ -5,6 +5,68 @@ matters more than the *what* (the code is the what). Newest first.
 
 ---
 
+## D-018 · React + FastAPI rewrite (supersedes D-014's deferral)
+**Date:** 2026-05-23 · **Branch:** `feature/react-frontend` · **Plan:** [docs/MIGRATION.md](MIGRATION.md)
+
+**Context.** D-014 (2026-05-21) deferred the FastAPI + React rewrite as P2,
+reasoning that EVAL.md and demo-video work were higher-leverage for AI PM
+hiring than UI polish. Two days later, a Claude Design output produced a
+genuinely-polished frontend reference (`design/pilot.jsx`, ~1275 lines) with
+Geist + Instrument Serif typography, a coral-accent warm dark theme, animated
+phase machine (typing → parsing → ready → running → done), and a streaming
+plan reveal. The design quality flipped the original trade-off: visual upgrade
+is now substantial enough to justify the ~10-12h cost.
+
+**Decision.** Build the new frontend on `feature/react-frontend` over a
+focused day. Reuse the existing `deckpilot/` Python package as the brain —
+the new FastAPI backend is a thin HTTP wrapper around `parser`, `executor`,
+`adapters/midi`, `adapters/midi_feedback`, and `library/reader`. No
+rewriting of business logic; the brain is done. The Streamlit dashboard
+(`app/dashboard.py`) stays in place during migration as a fallback and
+remains the documented dev tool.
+
+**Trade-off accepted.** Demo video + GitHub push + applications all delayed
+by ~2-3 days. Real cost in a tough market. Justified IF the visual upgrade
+genuinely lands better with hiring managers — testable empirically on the
+demo video.
+
+**What the migration explicitly keeps:**
+- All AI PM signal artifacts: EVAL.md (29-case suite), DECISIONS log (this
+  file), library awareness with LLM reasoning visible on suggestion cards.
+- The `claude -p` subprocess for LLM calls (per D-007 — not switching to
+  the Anthropic SDK).
+- The adapter pattern with `python-rtmidi` → IAC Driver virtual MIDI.
+- All 17 prior ADRs unchanged.
+
+**What the migration deliberately defers** (documented as day-1 non-goals):
+- WebSocket streaming of step.done events → replaced with 250ms HTTP polling
+  for day 1. Real WS is a +2-3h follow-up.
+- The design's "Tweaks" theme-swapper sidebar (`design/tweaks-panel.jsx`) —
+  not user-facing.
+- The auto-cycling demo loop in `usePilotFlow` — replaced with real
+  user-driven state machine.
+- Real backing of the queue UI — mocked as static for day 1.
+
+**Why this isn't violating D-007 / D-008 (claude-p, Haiku model).** Those
+ADRs are about LLM choice. This ADR is about UI choice. Independent
+concerns; no conflict.
+
+**Rollback path** (documented in MIGRATION.md):
+```bash
+git checkout main
+git branch -D feature/react-frontend
+rm -rf frontend backend     # if created
+# Streamlit + everything else works as before
+```
+
+The branch is fully isolated until Phase 6 merges. Abandoning mid-way costs
+only the hours already invested.
+
+**Status.** In progress. See [docs/MIGRATION.md](MIGRATION.md) for the
+six-phase checklist + resume guide for cross-session continuity.
+
+---
+
 ## D-017 · BPM lookup via `file_bpm`, not `bpm`, for library matching
 **Date:** 2026-05-22 · **Commit:** `e1c3b0e`
 
