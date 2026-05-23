@@ -112,28 +112,40 @@ design canvas verified.
       real backend wiring in Phase 4)
 - [x] All renders match `design/pilot.jsx` visually
 - [x] `npm run build` passes: 27 modules, 212KB bundle, no TS errors
+- [x] Commit: `feat(frontend): Phase 2 — port pilot.jsx into modular TS components` (`aaca9b2`)
 
-### Phase 3 — FastAPI backend (2-3h)
-- [ ] `backend/pyproject.toml` (FastAPI + uvicorn deps, points at deckpilot/)
-- [ ] `backend/main.py` (FastAPI app + CORS middleware for Vite dev origin)
-- [ ] `backend/services/singletons.py` (lazy LibraryReader / MidiAdapter /
-      Executor / MixxxFeedback singletons)
-- [ ] `backend/models.py` (Pydantic models mirroring the action dataclasses)
-- [ ] `backend/services/signatures.py` (`signature(action: DJAction) -> str`
-      that produces e.g. `swap.bass(deck:1 → deck:2, t:4s)` for the UI chip)
-- [ ] `backend/routes/parse.py` — POST /parse → `parser.parse(text, library,
-      deck_state)` wrapped in `asyncio.to_thread`. Returns plan + parsed
-      signature + confidence (the LLM doesn't currently return confidence —
-      hardcode 95 for LLM, 99 for regex, or extract later).
-- [ ] `backend/routes/execute.py` — POST /execute → run via Executor; on
-      `LoadTrackSuggestion`, return 200 with a `suggestion` payload instead.
-- [ ] `backend/routes/state.py` — GET /state → MixxxFeedback snapshot +
-      library lookup for track titles
-- [ ] `backend/routes/undo.py` — POST /undo → `inverse_plan(plan)` then run
-- [ ] `backend/routes/reset.py` — POST /reset → `reset_plan()` then run
-- [ ] `uvicorn backend.main:app --reload` works
-- [ ] Manual curl test: `curl -X POST :8000/parse -d '{"text":"play deck 1"}'`
-      returns valid JSON
+### Phase 3 — FastAPI backend (2-3h) ✅
+- [x] `pip install fastapi 'uvicorn[standard]'` into the existing venv
+      (no separate backend/pyproject.toml — backend imports from the
+      project-root `deckpilot/` package directly)
+- [x] `backend/main.py` (FastAPI app + CORS for Vite dev origin + lifespan
+      handler that calls `stop_feedback()` on shutdown)
+- [x] `backend/services/singletons.py` (lazy LibraryReader / MidiAdapter /
+      Executor / MixxxFeedback singletons; all return None on init failure
+      so callers can degrade gracefully)
+- [x] `backend/models.py` (Pydantic models — TrackPayload, DeckStatePayload,
+      ProgressPayload, StateResponse, PlanStepPayload, SuggestionPayload,
+      ParseRequest/Response, ExecuteRequest/Response, UndoRequest/Response)
+- [x] `backend/services/signatures.py` (`render_action(DJAction)` → (fn,
+      detail, t, dMs); `summary_signature(actions)` detects bass-swap
+      heuristically; `affects_label(actions)` lists touched decks)
+- [x] `backend/routes/parse.py` — POST /parse → regex first, LLM via
+      `asyncio.to_thread` if needed. Catches LoadTrack in the plan and
+      returns it as a `suggestion` payload (per D-015).
+- [x] `backend/routes/execute.py` — POST /execute → reconstructs
+      ActionPlan via existing `_payload_to_action`, runs via Executor in
+      a thread. Catches `LoadTrackSuggestion` and returns it as success
+      with a suggestion payload.
+- [x] `backend/routes/state.py` — GET /state → MixxxFeedback snapshot +
+      library BPM-match (±0.6 BPM tolerance, same as Streamlit dashboard)
+- [x] `backend/routes/undo.py` — POST /undo → `inverse_plan(plan)` then run
+- [x] `backend/routes/reset.py` — POST /reset → `reset_plan()` then run
+- [x] `uvicorn backend.main:app --port 8000` boots cleanly
+- [x] Curl tests pass:
+      - GET / → service metadata
+      - GET /state → both decks identified with live BPM + library lookup
+      - POST /parse "play deck 1" → regex path, ~5ms, valid JSON
+      - POST /parse "kill the bass on deck 1" → regex path, valid JSON
 - [ ] Commit: `feat(backend): FastAPI wrapping deckpilot/`
 
 ### Phase 4 — Wire frontend to backend (1-2h)
