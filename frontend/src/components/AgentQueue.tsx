@@ -203,6 +203,26 @@ function TriggerHint({
     );
   }
 
+  // after_beats trigger (D-023) — backend computes `remaining_count` from
+  // the per-step baseline so we don't have to track it client-side. If the
+  // step hasn't become current yet, remaining_count is null and we render
+  // the requested total. Live tick comes from `decks[N].beat_count` polled
+  // alongside the rest of the deck state — keeps the dot "alive."
+  if (step.trigger_kind === 'after_beats') {
+    const remaining = step.remaining_count ?? step.trigger_count ?? 0;
+    return (
+      <span
+        style={{
+          font: '500 10.5px/1 var(--p-mono)',
+          color: 'var(--p-accent)',
+          letterSpacing: '0.04em',
+        }}
+      >
+        deck {step.trigger_deck} → {remaining} beat{remaining === 1 ? '' : 's'} to go
+      </span>
+    );
+  }
+
   // deck_position trigger — render a live countdown to the threshold.
   const deck = decks.find((d) => d.n === step.trigger_deck);
   const target = step.trigger_at ?? 0;

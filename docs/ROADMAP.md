@@ -3,7 +3,7 @@
 Single source of truth for project status. Updated by humans (or future
 Claude) when state changes.
 
-Last updated: **2026-05-24**
+Last updated: **2026-05-24** (D-023 shipped)
 
 ## ✅ Shipped
 
@@ -37,6 +37,7 @@ Last updated: **2026-05-24**
 | **Pos-1** | **Playhead position read-back via MIDI scripted output (substrate for D-021)** | `a1a5327` |
 | **Agent-1** | **Demo-scoped Tier 2 agent layer: goal-directed schedules with triggers (D-021)** | `a1a5327` |
 | **Vocab-1** | **Action vocabulary expansion: filter, FX wet, pitch, variable loops (D-022)** | `31bbba1` |
+| **Agent-2** | **Beat-aware triggers (AfterBeats) — Tier 3 agent extension (D-023)** | `06590dc` + `c4e6b7e` |
 
 Functionally end-to-end working: type or speak (via WhisperType) →
 parsed via regex or Haiku → library-aware multi-step plan visible in
@@ -79,16 +80,20 @@ Current eval: 29 cases on non-library prompts. Add ~10 library cases:
 - Edge: empty library → expect decline with reasoning
 - Edge: ambiguous criteria → expect either decline or principled pick
 
-### 4. Thread 4: the agent layer (parked)
-Now newly substrate-ready thanks to Lib-2 (state read-back). Concepts:
-- **Beat-aware scheduling** — "in 8 beats, bass swap into deck 2"
-- **Goal-directed planning** — "transition to deck 2 in the next 16 bars"
-- **Recovery + re-planning** — track ran out, beat-grid drift
-
-Was the biggest pending direction before Library awareness shipped.
-Now even more interesting — Sessions 1-3 give an agent state visibility
-+ content choice. The remaining gap is musical-time scheduling +
-goal-directed planning.
+### 4. Thread 4: the agent layer (partly shipped, more to do)
+Tiers 2 (goal-directed schedules, D-021) and 3 (beat-aware triggers,
+D-023) are live. What's still parked:
+- ~~**Beat-aware scheduling** — "in 8 beats, bass swap into deck 2"~~
+  shipped in D-023 via the AfterBeats trigger.
+- **Goal-directed planning** — "transition to deck 2 in the next 16
+  bars": the user gives a goal range, the agent picks when to fire.
+  D-021 supports exact triggers; "fire within a range" is the next
+  abstraction up.
+- **Recovery + re-planning** — track ran out, beat-grid drift, the
+  LLM picked a wrong-BPM track. Today the user cancels + re-prompts.
+- **Stacked / parallel schedules** — currently one active schedule at
+  a time. A v0.4 multi-schedule queue would let the agent line up
+  several future moves.
 
 ### 5. UI redesign sketch (deferred; see D-014)
 Streamlit ceiling is real. FastAPI + React/Tailwind would deliver

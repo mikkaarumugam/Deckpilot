@@ -5,6 +5,113 @@ matters more than the *what* (the code is the what). Newest first.
 
 ---
 
+## D-023 · Beat-aware triggers — Tier 3 agent (extends D-021)
+**Date:** 2026-05-24 · **Commit:** _TBD_ · **Status: Shipped**
+
+**Context.** D-021 shipped the Tier 2 agent with two trigger types
+(`Immediate`, `DeckPosition`). The roadmap deliberately punted
+beat-aware triggers to v0.3 because they needed beat-grid read-back
+that wasn't wired yet. With D-022's substrate work done, that read-back
+is now a one-day add. The user-facing payoff is intents the agent
+couldn't previously honour: *"in 16 beats, bass swap into deck 2"*,
+*"after 8 beats fade to deck 1"*, *"in 4 bars switch the filter"*.
+Musical time, not wall-clock time.
+
+**Decision.** Three layers, each a mirror of an existing pattern:
+
+**1. Wire (third time, as the user noted).** Subscribe to
+`[ChannelN],beat_active` in `mixxx.midi.js` `init`. On the rising edge
+(0 → 1) of `beat_active`, send one `note_on` (notes `0x12` / `0x13`).
+MixxxFeedback decodes each note as one beat tick → increments a
+monotonic `DeckState.beat_count: int`. No 7-bit wrap concern — each
+beat is a discrete event, not a scaled CC. Python's `int` is
+unbounded.
+
+**2. Core trigger model.** New `AfterBeats(deck, count)` dataclass.
+`Trigger.fires()` gains a `baseline: MixxxState | None` parameter —
+`Immediate`/`DeckPosition` accept and ignore it; `AfterBeats` uses it
+to compute the elapsed-beats delta. Triggers stay frozen dataclasses;
+the runtime owns the mutable baseline state. This is the design call
+that took the longest: state-in-trigger vs state-in-runtime. The
+runtime won — it keeps `Trigger.fires` a pure function, makes
+unit-testing trivial (pass any two states), and dodges the question of
+"who owns reset semantics" because the runtime captures a new baseline
+each time a cursor advances.
+
+**3. Runtime + UI.** `AgentRuntime` snapshots state into a
+`_step_baselines: dict[int, MixxxState]` on the FIRST poll that sees a
+new cursor position. Reused on every subsequent poll until the trigger
+fires or the cursor advances. The `/agent/state` snapshot computes
+`remaining_count` server-side (beats still to go), so the React
+`AgentQueue`'s new countdown branch is dumb: render `step.remaining_count`
++ "beats to go." No client-side baseline math.
+
+**Why baseline = first poll, not start time.** A user could hit Run on
+a 5-step schedule whose first step takes 30 seconds to fire. If step 2
+is `AfterBeats(count=8)`, the user means "8 beats after step 1 ENDS",
+not "8 beats from when I clicked Run." Capturing baseline at cursor
+advance gives exactly that semantics for free. Documented in the
+agent.py module docstring.
+
+**Why beat-counting only one deck.** `AfterBeats(deck=1, count=8)`
+counts beats on deck 1 specifically. If deck 1 pauses, the count
+pauses with it — which is the right behaviour for "play this for 8
+more beats." If the user wanted wall-clock seconds they'd have said
+"in 4 seconds." Multi-deck triggers (`AfterBeats(any_deck, ...)`) are
+parked as a v0.4 idea — no compelling use case yet.
+
+**Architectural framing.** Two-line patch on top of D-021's design.
+The schedule envelope (`AgentSchedule = tuple[ScheduledPlan, ...]`),
+the cursor model, the `/agent/start` + `/agent/cancel` + `/agent/state`
+routes, the React `AgentQueue` shell — none changed. The wire format
+gained one trigger type, one `count` field, one `remaining_count`
+field, one `beat_count` field on the deck snapshot. That's the whole
+diff at the seams.
+
+**Tests.** A new `tests/test_agent.py` covers
+- each trigger's `fires()` semantics (Immediate / DeckPosition /
+  AfterBeats × baseline / no-baseline)
+- LLM validator round-trips for trigger JSON (accept valid, reject
+  out-of-range / wrong-type / missing fields)
+- AgentRuntime baseline capture (first-poll baseline, per-step
+  baselines for chained AfterBeats, remaining_count math).
+Drives the runtime with a scripted state-sequence generator so no
+MIDI / Mixxx needed. 23 new tests; 100 total green.
+
+**Interview line.**
+> *"v0.3 ships the v0.4 piece of the agent layer ahead of schedule.
+> Beat-aware triggers turn 'transition in 16 beats' into a real
+> primitive instead of asking the user to count seconds. The design
+> call I'd flag is keeping triggers as pure functions and putting
+> baseline state in the runtime — keeps the trigger union frozen,
+> makes unit-testing one-line. Triggers are values; the runtime is
+> where time lives."*
+
+**Trade-offs accepted.**
+- Beat resolution is one beat (~462ms at 130 BPM). Combined with
+  500ms polling, an `AfterBeats(count=8)` may fire up to ~half a beat
+  late. Acceptable for the "in N beats" use case; surgical
+  beat-locked triggers would need `beat_distance` (sub-beat phase) +
+  faster polling. Out of scope.
+- The runtime never RE-captures a baseline. If Mixxx pauses then
+  resumes mid-wait, the baseline is still the original snapshot — so
+  the count effectively pauses with the deck (because Mixxx stops
+  emitting beat_active). This is the right behaviour for "in 4 beats"
+  intents.
+- One active schedule. Same as D-021. Stacked / parallel schedules
+  remain v0.4.
+
+**Status.** Shipped 2026-05-24. Demo intent of record:
+> *"play deck 1, then in 16 beats bass swap into deck 2 over 4 seconds"*
+
+The Run button kicks off the schedule. Step 1 (Immediate, play deck 1)
+fires instantly. Step 2's `AfterBeats(deck=1, count=16)` trigger sees
+its baseline captured, AgentQueue shows "deck 1 → 16 beats to go" and
+counts down once per beat as Mixxx ticks. At beat 16 (4 bars at
+standard 4/4) the bass swap fires.
+
+---
+
 ## D-022 · Action vocabulary expansion — filter, FX, pitch, variable loops
 **Date:** 2026-05-24 · **Commit:** `31bbba1` · **Status: Shipped**
 

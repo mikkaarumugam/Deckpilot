@@ -39,6 +39,9 @@ export interface DeckStatePayload {
   bpm: number;
   track: TrackPayload | null;
   progress: ProgressPayload;
+  /** Monotonic beat counter from Mixxx's `beat_active`. Used by the
+   *  agent queue's countdown for after_beats triggers — see D-023. */
+  beat_count: number;
 }
 
 export interface StateResponse {
@@ -67,12 +70,17 @@ export interface SuggestionPayload {
   auto_loadable: boolean;
 }
 
-/** One trigger from an AgentSchedule. `deck` and `at` are populated
- *  only when type === 'deck_position'. See deckpilot/core/agent.py. */
+/** One trigger from an AgentSchedule.
+ *   - immediate:     no extra fields
+ *   - deck_position: deck + at (0..1)
+ *   - after_beats:   deck + count (D-023 — beats from when the step
+ *                    became pending)
+ *  See deckpilot/core/agent.py. */
 export interface TriggerPayload {
-  type: 'immediate' | 'deck_position';
+  type: 'immediate' | 'deck_position' | 'after_beats';
   deck: number | null;
   at: number | null;
+  count: number | null;
 }
 
 /** One scheduled step inside an AgentSchedule — a trigger + the plan
@@ -124,9 +132,15 @@ export interface AgentSimpleResponse {
 
 export interface AgentStepStatus {
   label: string;
-  trigger_kind: 'immediate' | 'deck_position';
+  trigger_kind: 'immediate' | 'deck_position' | 'after_beats';
   trigger_deck: number | null;
   trigger_at: number | null;
+  /** Total beats requested for an after_beats trigger. */
+  trigger_count: number | null;
+  /** Beats still to go — computed server-side from the runtime's
+   *  per-step baseline. Null until the step is current; null again
+   *  once the step has fired. */
+  remaining_count: number | null;
   status: 'done' | 'running' | 'pending';
 }
 
