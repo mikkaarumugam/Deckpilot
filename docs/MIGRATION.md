@@ -91,23 +91,27 @@ Update each `[ ]` to `[x]` as items complete. Commit at the end of each phase.
       Mono code chip — verifies every token resolves
 - [x] `npm run dev` boots clean (port 5173, 173ms ready time)
 - [x] `npm run build` passes TS + bundles 192KB JS / 4KB CSS
-- [ ] Commit: `feat(frontend): Vite + TS scaffold + design tokens`
+- [x] Commit: `feat(frontend): Vite + TS scaffold + design tokens` (`f2a2411`)
 
-### Phase 2 — Component port (3-4h)
-Port pilot.jsx (1275 lines, near-end-of-file is the Pilot main component) into
-these TS files. Static/mock data for now; backend wiring is Phase 4.
+### Phase 2 — Component port (3-4h) ✅
+Ported pilot.jsx (1275 lines) into 9 modular TS components + a shared
+`types.ts` + the demo-mode `usePilotFlow` hook. Visual parity with the
+design canvas verified.
 
-- [ ] `frontend/src/components/BPMPulse.tsx` (small, animated dot)
-- [ ] `frontend/src/components/Chip.tsx` (rounded chip with optional kbd hint)
-- [ ] `frontend/src/components/PhaseBadge.tsx` (typing/parsing/ready/running/done)
-- [ ] `frontend/src/components/RunButton.tsx` (morphs by phase)
-- [ ] `frontend/src/components/PlanStep.tsx` (rail+node timeline item)
-- [ ] `frontend/src/components/DeckCard.tsx` (deck + BPM + track)
-- [ ] `frontend/src/components/HistoryItem.tsx` (history row with undo)
-- [ ] `frontend/src/components/CommandCard.tsx` (hero card)
-- [ ] `frontend/src/Pilot.tsx` (main shell — composes everything)
-- [ ] All renders match `design/pilot.jsx` visually (eyeball check each)
-- [ ] Commit: `feat(frontend): port pilot.jsx into modular TS components`
+- [x] `frontend/src/types.ts` (shared types: Phase, PlanStepState, DeckState…)
+- [x] `frontend/src/components/BPMPulse.tsx` (small, animated dot)
+- [x] `frontend/src/components/Chip.tsx` (rounded chip with optional kbd hint)
+- [x] `frontend/src/components/PhaseBadge.tsx` (typing/parsing/ready/running/done)
+- [x] `frontend/src/components/RunButton.tsx` (morphs by phase)
+- [x] `frontend/src/components/PlanStep.tsx` (rail+node timeline item)
+- [x] `frontend/src/components/DeckCard.tsx` (deck + BPM + track)
+- [x] `frontend/src/components/HistoryItem.tsx` (history row with undo)
+- [x] `frontend/src/components/CommandCard.tsx` (hero card)
+- [x] `frontend/src/Pilot.tsx` (main shell — composes everything)
+- [x] `frontend/src/hooks/usePilotFlow.ts` (demo state machine — replaced by
+      real backend wiring in Phase 4)
+- [x] All renders match `design/pilot.jsx` visually
+- [x] `npm run build` passes: 27 modules, 212KB bundle, no TS errors
 
 ### Phase 3 — FastAPI backend (2-3h)
 - [ ] `backend/pyproject.toml` (FastAPI + uvicorn deps, points at deckpilot/)
