@@ -47,10 +47,17 @@ class FadeToDeck:
     seconds: float
 
 
+# Beat counts the Mixxx mapping actually has bindings for. Other values
+# raise from the adapter — keeps "loop for 7 beats" from silently snapping
+# to 8 the way v0.1 did. Mirror this list in the LLM prompt + the XML
+# mapping (mixxx.midi.xml) when extending.
+LOOP_BEAT_SIZES = (1, 2, 4, 8, 16, 32)
+
+
 @dataclass(frozen=True)
 class LoopDeck:
     deck: int
-    beats: int  # currently always treated as 8 by the Mixxx mapping (v0.1 limitation)
+    beats: int  # must be one of LOOP_BEAT_SIZES; the adapter validates.
 
 
 @dataclass(frozen=True)
@@ -88,6 +95,46 @@ class Sync:
 
 
 @dataclass(frozen=True)
+class SetFilter:
+    """Per-deck single-knob filter (Mixxx QuickEffectRack super1).
+
+    value 0.0 = full low-pass, 0.5 = bypass (no filter), 1.0 = full high-pass.
+    One knob covers both filters — matches Pioneer/standard-mixer ergonomics
+    and Mixxx's underlying control. See D-022.
+    """
+    deck: int
+    value: float
+
+
+@dataclass(frozen=True)
+class SetFx:
+    """Per-deck FX wet for one of Mixxx's two effect units.
+
+    Per-deck routing is achieved by combining the unit's `group_[ChannelN]_enable`
+    assignment toggle with the unit's `mix` knob (handled in mixxx.midi.js).
+    Caveat: the unit's `mix` is global — setting wet on both decks for the same
+    unit shares the value. See D-022 for the trade-off rationale.
+
+    value 0.0 = unit disabled on this deck; >0 = enabled + unit mix=value.
+    unit is 1 or 2.
+    """
+    deck: int
+    unit: Literal[1, 2]
+    value: float
+
+
+@dataclass(frozen=True)
+class SetPitch:
+    """Per-deck pitch slider (Mixxx `rate`, ±8% by default).
+
+    value -1.0 = full down (-8%), 0.0 = no shift, +1.0 = full up (+8%).
+    Bipolar scaling is done in the JS handler (CC 64 = neutral).
+    """
+    deck: int
+    value: float
+
+
+@dataclass(frozen=True)
 class LoadTrack:
     """Load a library track onto a deck.
 
@@ -118,6 +165,9 @@ DJAction = Union[
     SetVolume,
     HotCue,
     Sync,
+    SetFilter,
+    SetFx,
+    SetPitch,
     LoadTrack,
 ]
 

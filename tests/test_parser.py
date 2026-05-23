@@ -22,6 +22,9 @@ from deckpilot.core.actions import (
     PlayDeck,
     SetCrossfader,
     SetEQ,
+    SetFilter,
+    SetFx,
+    SetPitch,
     Sync,
 )
 from deckpilot.core.parser import ParseError, regex, parse
@@ -89,6 +92,38 @@ from deckpilot.core.parser import ParseError, regex, parse
     ("kill loop", LoopDeck(deck=1, beats=8)),
     ("turn off the loop", LoopDeck(deck=1, beats=8)),
     ("exit loop on deck 2", LoopDeck(deck=2, beats=8)),
+
+    # variable-beat loops (D-022): the existing regex already accepts any int;
+    # only the adapter cares whether the size is bindable.
+    ("loop deck 1 for 4 beats", LoopDeck(deck=1, beats=4)),
+    ("loop deck 2 for 32 beats", LoopDeck(deck=2, beats=32)),
+
+    # filter (D-022) — single knob, 0.0 LPF / 0.5 bypass / 1.0 HPF
+    ("low pass deck 1", SetFilter(deck=1, value=0.0)),
+    ("low-pass on deck 2", SetFilter(deck=2, value=0.0)),
+    ("lowpass", SetFilter(deck=1, value=0.0)),
+    ("high pass deck 2", SetFilter(deck=2, value=1.0)),
+    ("highpass", SetFilter(deck=1, value=1.0)),
+    ("filter off", SetFilter(deck=1, value=0.5)),
+    ("filter off on deck 2", SetFilter(deck=2, value=0.5)),
+    ("no filter", SetFilter(deck=1, value=0.5)),
+    ("reset filter on deck 2", SetFilter(deck=2, value=0.5)),
+
+    # FX wet (D-022)
+    ("fx 1 to 50% on deck 1", SetFx(deck=1, unit=1, value=0.5)),
+    ("fx2 80% on deck 2", SetFx(deck=2, unit=2, value=0.8)),
+    ("effect 1 to 100% on deck 1", SetFx(deck=1, unit=1, value=1.0)),
+    ("kill fx 1 on deck 2", SetFx(deck=2, unit=1, value=0.0)),
+    ("no fx 2", SetFx(deck=1, unit=2, value=0.0)),
+
+    # pitch (D-022) — bare ±, then percent → fractional of ±8% range
+    ("pitch deck 1 up", SetPitch(deck=1, value=1.0)),
+    ("pitch deck 2 down", SetPitch(deck=2, value=-1.0)),
+    ("pitch deck 1 up 4%", SetPitch(deck=1, value=0.5)),
+    ("pitch deck 2 down 8%", SetPitch(deck=2, value=-1.0)),
+    ("pitch up", SetPitch(deck=1, value=1.0)),
+    ("reset pitch", SetPitch(deck=1, value=0.0)),
+    ("reset pitch on deck 2", SetPitch(deck=2, value=0.0)),
 ])
 def test_regex_parse_matches(text: str, expected_action) -> None:
     """Each canonical phrasing produces a 1-step plan with the expected action at t=0."""

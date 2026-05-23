@@ -27,6 +27,9 @@ from deckpilot.core.actions import (
     PlayDeck,
     SetCrossfader,
     SetEQ,
+    SetFilter,
+    SetFx,
+    SetPitch,
     SetVolume,
     Sync,
     TimedAction,
@@ -38,6 +41,9 @@ from deckpilot.core.actions import (
 NEUTRAL_EQ = 1.0          # Mixxx EQ: 1.0 = unity (no boost/cut)
 NEUTRAL_VOLUME = 1.0      # full
 NEUTRAL_CROSSFADER = 0.5  # center
+NEUTRAL_FILTER = 0.5      # bypass (Pioneer-style single-knob center)
+NEUTRAL_FX = 0.0          # FX off / unit not routed to this deck
+NEUTRAL_PITCH = 0.0       # no pitch shift
 
 
 def inverse_action(action: DJAction) -> DJAction | None:
@@ -59,6 +65,12 @@ def inverse_action(action: DJAction) -> DJAction | None:
         return SetEQ(deck=action.deck, band=action.band, value=NEUTRAL_EQ)
     if isinstance(action, SetVolume):
         return SetVolume(deck=action.deck, value=NEUTRAL_VOLUME)
+    if isinstance(action, SetFilter):
+        return SetFilter(deck=action.deck, value=NEUTRAL_FILTER)
+    if isinstance(action, SetFx):
+        return SetFx(deck=action.deck, unit=action.unit, value=NEUTRAL_FX)
+    if isinstance(action, SetPitch):
+        return SetPitch(deck=action.deck, value=NEUTRAL_PITCH)
     # NudgeDeck, HotCue, Sync are transient/stateful in ways we can't cleanly
     # undo without tracking prior state. Return None to skip them.
     if isinstance(action, (NudgeDeck, HotCue, Sync)):
@@ -83,6 +95,17 @@ def reset_plan() -> ActionPlan:
         for band in ("low", "mid", "high"):
             steps.append(TimedAction(
                 action=SetEQ(deck=deck, band=band, value=NEUTRAL_EQ),  # type: ignore[arg-type]
+                at_seconds=0.0,
+            ))
+        steps.append(TimedAction(
+            action=SetFilter(deck=deck, value=NEUTRAL_FILTER), at_seconds=0.0,
+        ))
+        steps.append(TimedAction(
+            action=SetPitch(deck=deck, value=NEUTRAL_PITCH), at_seconds=0.0,
+        ))
+        for unit in (1, 2):
+            steps.append(TimedAction(
+                action=SetFx(deck=deck, unit=unit, value=NEUTRAL_FX),  # type: ignore[arg-type]
                 at_seconds=0.0,
             ))
     return ActionPlan(steps=tuple(steps))

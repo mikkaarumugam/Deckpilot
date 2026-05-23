@@ -29,6 +29,9 @@ from deckpilot.core.actions import (
     PlayDeck,
     SetCrossfader,
     SetEQ,
+    SetFilter,
+    SetFx,
+    SetPitch,
     SetVolume,
     Sync,
 )
@@ -120,6 +123,46 @@ def render_action(action: DJAction) -> tuple[str, str, str, int]:
         return (
             f"tempo.sync(deck:{action.deck})",
             "match BPM + beat alignment",
+            "—",
+            200,
+        )
+    if isinstance(action, SetFilter):
+        # Single-knob filter: 0.5 is bypass. Read the value in plain English
+        # so the plan-step detail tells the user what they're about to hear.
+        if action.value <= 0.001:
+            detail = "full low-pass"
+        elif action.value >= 0.999:
+            detail = "full high-pass"
+        elif abs(action.value - 0.5) <= 0.01:
+            detail = "bypass"
+        elif action.value < 0.5:
+            detail = f"low-pass {(0.5 - action.value) * 2:.0%}"
+        else:
+            detail = f"high-pass {(action.value - 0.5) * 2:.0%}"
+        return (
+            f"filter(deck:{action.deck})",
+            detail,
+            "—",
+            200,
+        )
+    if isinstance(action, SetFx):
+        detail = "off" if action.value <= 0.001 else f"wet {action.value:.0%}"
+        return (
+            f"fx{action.unit}(deck:{action.deck})",
+            detail,
+            "—",
+            200,
+        )
+    if isinstance(action, SetPitch):
+        # Render as a ±% relative to Mixxx's default 8% range so the UI
+        # shows musically-meaningful numbers instead of raw -1..+1 floats.
+        if abs(action.value) <= 0.001:
+            detail = "0 %"
+        else:
+            detail = f"{action.value * 8:+.1f} %"
+        return (
+            f"pitch(deck:{action.deck})",
+            detail,
             "—",
             200,
         )

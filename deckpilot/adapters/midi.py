@@ -20,6 +20,7 @@ import rtmidi
 
 from deckpilot.adapters.base import Adapter
 from deckpilot.core.actions import (
+    LOOP_BEAT_SIZES,
     DJAction,
     HotCue,
     LoadTrack,
@@ -29,6 +30,9 @@ from deckpilot.core.actions import (
     PlayDeck,
     SetCrossfader,
     SetEQ,
+    SetFilter,
+    SetFx,
+    SetPitch,
     SetVolume,
     Sync,
 )
@@ -76,8 +80,17 @@ PAUSE_NOTES = {1: 0x3D, 2: 0x3F}    # 61, 63
 # Crossfader (CC 20).
 CROSSFADER_CC = 0x14
 
-# Loop toggles (8 beats only in v0.1).
-LOOP_NOTES = {1: 0x46, 2: 0x47}     # 70, 71
+# Loop toggles, one per (deck, beats). Mirror in mixxx.midi.xml — both files
+# share this allocation. Toggle: re-firing the same note ends the loop.
+# Firing a different size while a loop is active replaces it.
+#   deck 1: 0x40..0x45 for sizes 1, 2, 4, 8, 16, 32
+#   deck 2: 0x48..0x4D for sizes 1, 2, 4, 8, 16, 32
+LOOP_NOTES: dict[tuple[int, int], int] = {
+    (1, 1):  0x40, (1, 2):  0x41, (1, 4):  0x42,
+    (1, 8):  0x43, (1, 16): 0x44, (1, 32): 0x45,
+    (2, 1):  0x48, (2, 2):  0x49, (2, 4):  0x4A,
+    (2, 8):  0x4B, (2, 16): 0x4C, (2, 32): 0x4D,
+}
 
 # Nudge (rate_temp_up/down — held while button is down).
 NUDGE_NOTES = {
@@ -108,6 +121,20 @@ EQ_CC = {
 
 # Channel volume (CC 40, 41).
 VOLUME_CC = {1: 0x28, 2: 0x29}
+
+# Filter knob per deck (CC 36, 37). Maps to QuickEffectRack super1: 0.5 = bypass.
+FILTER_CC = {1: 0x24, 2: 0x25}
+
+# Pitch slider per deck (CC 38, 39). Script-bound — JS handler does bipolar
+# scaling so CC 64 = rate 0.0 (no pitch shift).
+PITCH_CC = {1: 0x26, 2: 0x27}
+
+# FX wet per (deck, unit) (CC 52..55). Script-bound — JS handler toggles
+# the deck's assignment on the unit AND sets the unit's mix knob.
+FX_CC: dict[tuple[int, int], int] = {
+    (1, 1): 0x34, (1, 2): 0x35,
+    (2, 1): 0x36, (2, 2): 0x37,
+}
 
 DEFAULT_PORT_NAME = "IAC Driver Bus 1"
 
@@ -165,7 +192,12 @@ class MidiAdapter(Adapter):
             self._cc(CROSSFADER_CC, round(clamped * 127))
 
         elif isinstance(action, LoopDeck):
-            self._note_on(LOOP_NOTES[action.deck], velocity=127)
+            if action.beats not in LOOP_BEAT_SIZES:
+                raise ValueError(
+                    f"loop beats must be one of {LOOP_BEAT_SIZES}, "
+                    f"got {action.beats}"
+                )
+            self._note_on(LOOP_NOTES[(action.deck, action.beats)], velocity=127)
 
         elif isinstance(action, NudgeDeck):
             note = NUDGE_NOTES[(action.deck, action.direction)]
@@ -188,6 +220,24 @@ class MidiAdapter(Adapter):
 
         elif isinstance(action, Sync):
             self._note_on(SYNC_NOTES[action.deck], velocity=127)
+
+        elif isinstance(action, SetFilter):
+            clamped = max(0.0, min(1.0, action.value))
+            self._cc(FILTER_CC[action.deck], round(clamped * 127))
+
+        elif isinstance(action, SetFx):
+            if action.unit not in (1, 2):
+                raise ValueError(f"fx unit must be 1 or 2, got {action.unit}")
+            clamped = max(0.0, min(1.0, action.value))
+            self._cc(FX_CC[(action.deck, action.unit)], round(clamped * 127))
+
+        elif isinstance(action, SetPitch):
+            # Bipolar: -1..+1 → CC 0..127 with 64 = neutral (no pitch shift).
+            # JS handler inverts this back to rate; keeping the math here
+            # makes the Python-side action contract clean.
+            clamped = max(-1.0, min(1.0, action.value))
+            cc_value = 64 + round(clamped * 63)
+            self._cc(PITCH_CC[action.deck], cc_value)
 
         elif isinstance(action, LoadTrack):
             self._dispatch_load_track(action)

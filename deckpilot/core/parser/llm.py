@@ -20,6 +20,7 @@ import subprocess
 from typing import TYPE_CHECKING, Any
 
 from deckpilot.core.actions import (
+    LOOP_BEAT_SIZES,
     ActionPlan,
     DJAction,
     FadeToDeck,
@@ -31,6 +32,9 @@ from deckpilot.core.actions import (
     PlayDeck,
     SetCrossfader,
     SetEQ,
+    SetFilter,
+    SetFx,
+    SetPitch,
     SetVolume,
     Sync,
     TimedAction,
@@ -84,10 +88,13 @@ Supported atomic actions:
   pause_deck     {"action":"pause_deck",     "deck":1|2}
   set_crossfader {"action":"set_crossfader", "value":float 0..1}
   fade_to_deck   {"action":"fade_to_deck",   "deck":1|2, "seconds":float}
-  loop_deck      {"action":"loop_deck",      "deck":1|2, "beats":int}
+  loop_deck      {"action":"loop_deck",      "deck":1|2, "beats":int in {1,2,4,8,16,32}}
   nudge_deck     {"action":"nudge_deck",     "deck":1|2, "direction":"forward"|"back"}
   set_eq         {"action":"set_eq",         "deck":1|2, "band":"low"|"mid"|"high", "value":float 0..1}
   set_volume     {"action":"set_volume",     "deck":1|2, "value":float 0..1}
+  set_filter     {"action":"set_filter",     "deck":1|2, "value":float 0..1}  // 0.0=full LPF, 0.5=bypass, 1.0=full HPF (one knob)
+  set_fx         {"action":"set_fx",         "deck":1|2, "unit":1|2, "value":float 0..1}  // wet level on FX unit; 0.0 disables routing
+  set_pitch      {"action":"set_pitch",      "deck":1|2, "value":float -1..+1}  // -1=full down, 0=neutral, +1=full up (±8% range)
   hot_cue        {"action":"hot_cue",        "deck":1|2, "cue":int 1..8}
   sync           {"action":"sync",           "deck":1|2}
   load_track     {"action":"load_track",     "deck":1|2, "track_id":int, "reasoning":string}    // only when LIBRARY CONTEXT is provided. "reasoning" is one short line explaining the pick (BPM fit, key, vibe).
@@ -106,6 +113,18 @@ Rules:
 - Loops are TOGGLES — calling loop_deck again turns an active loop off.
     "loop deck 1 for 8 beats" → loop_deck (turns on)
     "stop loop" / "kill loop" / "turn off loop" / "exit loop" → loop_deck again (turns off)
+- Allowed loop sizes: {1, 2, 4, 8, 16, 32} beats. If the user asks for a
+  non-power-of-2 size, round to the nearest allowed value.
+- Filter knob: ONE knob per deck. 0.5 is bypass (no filter). "low pass" /
+  "lowpass" / "LPF" → value 0.0. "high pass" / "HPF" → value 1.0.
+  "sweep up the filter" → ramp from 0.5 toward 1.0. "filter off" → 0.5.
+- FX wet: "fx 1 to 50% on deck 1" → set_fx deck=1 unit=1 value=0.5.
+  "kill fx 1" / "no fx 2" → value 0.0 (disables routing on that deck).
+  Trade-off: Mixxx's unit mix is global per unit, so two decks routed to
+  the same unit share the wet level. Don't worry about this — just emit
+  per-deck set_fx calls; the adapter handles it.
+- Pitch: "pitch up" / "pitch down" → ±1.0 (full slider). "pitch up 4%" →
+  +0.5 (half the ±8% range). "reset pitch" → 0.0.
 - Interpret intent generously: "drop deck 2" = play_deck 2, "kick into the second deck" = play_deck 2.
 - Default fade duration: 8s. Default loop: 8 beats.
 - ONLY return "unknown" for things genuinely outside the action vocabulary
@@ -121,6 +140,15 @@ SIMPLE examples (note how missing deck defaults to 1, never refused):
 "stop loop"            -> {"plan":[{"at":0,"action":"loop_deck","deck":1,"beats":8}]}
 "kill loop"            -> {"plan":[{"at":0,"action":"loop_deck","deck":1,"beats":8}]}
 "turn off the loop"    -> {"plan":[{"at":0,"action":"loop_deck","deck":1,"beats":8}]}
+"loop 4 beats"         -> {"plan":[{"at":0,"action":"loop_deck","deck":1,"beats":4}]}
+"low pass deck 1"      -> {"plan":[{"at":0,"action":"set_filter","deck":1,"value":0.0}]}
+"high pass deck 2"     -> {"plan":[{"at":0,"action":"set_filter","deck":2,"value":1.0}]}
+"filter off"           -> {"plan":[{"at":0,"action":"set_filter","deck":1,"value":0.5}]}
+"fx 1 to 50% deck 1"   -> {"plan":[{"at":0,"action":"set_fx","deck":1,"unit":1,"value":0.5}]}
+"kill fx 2 on deck 2"  -> {"plan":[{"at":0,"action":"set_fx","deck":2,"unit":2,"value":0.0}]}
+"pitch deck 1 up"      -> {"plan":[{"at":0,"action":"set_pitch","deck":1,"value":1.0}]}
+"pitch deck 2 down 4%" -> {"plan":[{"at":0,"action":"set_pitch","deck":2,"value":-0.5}]}
+"reset pitch"          -> {"plan":[{"at":0,"action":"set_pitch","deck":1,"value":0.0}]}
 
 MULTI-STEP example: bass swap (the canonical EQ-based DJ transition):
 "bass swap into deck 2" ->
@@ -497,7 +525,12 @@ def _payload_to_action(payload: dict[str, Any], *, original_text: str) -> DJActi
         if name == "fade_to_deck":
             return FadeToDeck(deck=int(payload["deck"]), seconds=float(payload["seconds"]))
         if name == "loop_deck":
-            return LoopDeck(deck=int(payload["deck"]), beats=int(payload["beats"]))
+            beats = int(payload["beats"])
+            if beats not in LOOP_BEAT_SIZES:
+                raise LLMParseError(
+                    f"loop_deck beats must be one of {LOOP_BEAT_SIZES}, got {beats}"
+                )
+            return LoopDeck(deck=int(payload["deck"]), beats=beats)
         if name == "nudge_deck":
             direction = payload["direction"]
             if direction not in {"forward", "back"}:
@@ -510,6 +543,19 @@ def _payload_to_action(payload: dict[str, Any], *, original_text: str) -> DJActi
             return SetEQ(deck=int(payload["deck"]), band=band, value=float(payload["value"]))
         if name == "set_volume":
             return SetVolume(deck=int(payload["deck"]), value=float(payload["value"]))
+        if name == "set_filter":
+            return SetFilter(deck=int(payload["deck"]), value=float(payload["value"]))
+        if name == "set_fx":
+            unit = int(payload["unit"])
+            if unit not in (1, 2):
+                raise LLMParseError(f"set_fx unit must be 1 or 2, got {unit}")
+            return SetFx(
+                deck=int(payload["deck"]),
+                unit=unit,  # type: ignore[arg-type]
+                value=float(payload["value"]),
+            )
+        if name == "set_pitch":
+            return SetPitch(deck=int(payload["deck"]), value=float(payload["value"]))
         if name == "hot_cue":
             return HotCue(deck=int(payload["deck"]), cue=int(payload["cue"]))
         if name == "sync":

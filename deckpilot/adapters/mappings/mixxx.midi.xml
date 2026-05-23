@@ -78,20 +78,39 @@ Binding modes:
             </control>
 
             <!-- =================================================================== -->
-            <!-- Loop (fixed 8 beats for v0.1) -->
+            <!-- Variable loops (D-022). Each (deck, beats) gets its own toggle.
+                 Toggling a different size while a loop is active replaces it
+                 (Mixxx native behavior). Keep the LOOP_NOTES table in
+                 adapters/midi.py in sync.
+
+                   deck 1: 1=0x40, 2=0x41, 4=0x42, 8=0x43, 16=0x44, 32=0x45
+                   deck 2: 1=0x48, 2=0x49, 4=0x4A, 8=0x4B, 16=0x4C, 32=0x4D
+                 (Gap at 0x46/0x47 leaves room for future sizes.) -->
             <!-- =================================================================== -->
-            <control>
-                <group>[Channel1]</group>
-                <key>beatloop_8_toggle</key>
-                <status>0x90</status><midino>0x46</midino>
-                <options><normal/></options>
-            </control>
-            <control>
-                <group>[Channel2]</group>
-                <key>beatloop_8_toggle</key>
-                <status>0x90</status><midino>0x47</midino>
-                <options><normal/></options>
-            </control>
+            <control><group>[Channel1]</group><key>beatloop_1_toggle</key>
+                <status>0x90</status><midino>0x40</midino><options><normal/></options></control>
+            <control><group>[Channel1]</group><key>beatloop_2_toggle</key>
+                <status>0x90</status><midino>0x41</midino><options><normal/></options></control>
+            <control><group>[Channel1]</group><key>beatloop_4_toggle</key>
+                <status>0x90</status><midino>0x42</midino><options><normal/></options></control>
+            <control><group>[Channel1]</group><key>beatloop_8_toggle</key>
+                <status>0x90</status><midino>0x43</midino><options><normal/></options></control>
+            <control><group>[Channel1]</group><key>beatloop_16_toggle</key>
+                <status>0x90</status><midino>0x44</midino><options><normal/></options></control>
+            <control><group>[Channel1]</group><key>beatloop_32_toggle</key>
+                <status>0x90</status><midino>0x45</midino><options><normal/></options></control>
+            <control><group>[Channel2]</group><key>beatloop_1_toggle</key>
+                <status>0x90</status><midino>0x48</midino><options><normal/></options></control>
+            <control><group>[Channel2]</group><key>beatloop_2_toggle</key>
+                <status>0x90</status><midino>0x49</midino><options><normal/></options></control>
+            <control><group>[Channel2]</group><key>beatloop_4_toggle</key>
+                <status>0x90</status><midino>0x4A</midino><options><normal/></options></control>
+            <control><group>[Channel2]</group><key>beatloop_8_toggle</key>
+                <status>0x90</status><midino>0x4B</midino><options><normal/></options></control>
+            <control><group>[Channel2]</group><key>beatloop_16_toggle</key>
+                <status>0x90</status><midino>0x4C</midino><options><normal/></options></control>
+            <control><group>[Channel2]</group><key>beatloop_32_toggle</key>
+                <status>0x90</status><midino>0x4D</midino><options><normal/></options></control>
 
             <!-- =================================================================== -->
             <!-- Nudge (rate_temp_up/down — hold-to-nudge button behavior) -->
@@ -249,6 +268,75 @@ Binding modes:
                 <key>volume</key>
                 <status>0xB0</status><midino>0x29</midino>
                 <options><normal/></options>
+            </control>
+
+            <!-- =================================================================== -->
+            <!-- Filter knob per deck (D-022). One knob = LPF below center,
+                 bypass at center, HPF above. QuickEffectRack super1 is
+                 Mixxx's native single-knob filter; matches Pioneer-style
+                 mixer ergonomics. -->
+            <!-- =================================================================== -->
+            <control>
+                <group>[QuickEffectRack1_[Channel1]]</group>
+                <key>super1</key>
+                <status>0xB0</status><midino>0x24</midino>
+                <options><normal/></options>
+            </control>
+            <control>
+                <group>[QuickEffectRack1_[Channel2]]</group>
+                <key>super1</key>
+                <status>0xB0</status><midino>0x25</midino>
+                <options><normal/></options>
+            </control>
+
+            <!-- =================================================================== -->
+            <!-- Pitch slider per deck (D-022). Script-bound so the JS handler
+                 can do bipolar scaling: CC 0..127 → rate -1..+1 (Mixxx's
+                 default rate range is ±8% pitch). CC 64 = neutral. -->
+            <!-- =================================================================== -->
+            <control>
+                <group>[Channel1]</group>
+                <key>DeckPilot.setPitch1</key>
+                <status>0xB0</status><midino>0x26</midino>
+                <options><script-binding/></options>
+            </control>
+            <control>
+                <group>[Channel2]</group>
+                <key>DeckPilot.setPitch2</key>
+                <status>0xB0</status><midino>0x27</midino>
+                <options><script-binding/></options>
+            </control>
+
+            <!-- =================================================================== -->
+            <!-- FX wet per (deck, unit) (D-022). Script-bound: the handler
+                 toggles the per-deck assignment (group_[ChannelN]_enable)
+                 AND sets the unit's mix knob. Mixxx's unit mix is global
+                 per unit, so setting wet on both decks for the same unit
+                 shares the value — documented trade-off. -->
+            <!-- =================================================================== -->
+            <control>
+                <group>[EffectRack1_EffectUnit1]</group>
+                <key>DeckPilot.setFxDeck1Unit1</key>
+                <status>0xB0</status><midino>0x34</midino>
+                <options><script-binding/></options>
+            </control>
+            <control>
+                <group>[EffectRack1_EffectUnit2]</group>
+                <key>DeckPilot.setFxDeck1Unit2</key>
+                <status>0xB0</status><midino>0x35</midino>
+                <options><script-binding/></options>
+            </control>
+            <control>
+                <group>[EffectRack1_EffectUnit1]</group>
+                <key>DeckPilot.setFxDeck2Unit1</key>
+                <status>0xB0</status><midino>0x36</midino>
+                <options><script-binding/></options>
+            </control>
+            <control>
+                <group>[EffectRack1_EffectUnit2]</group>
+                <key>DeckPilot.setFxDeck2Unit2</key>
+                <status>0xB0</status><midino>0x37</midino>
+                <options><script-binding/></options>
             </control>
 
             <!-- =================================================================== -->

@@ -28,6 +28,9 @@ from deckpilot.core.actions import (
     PlayDeck,
     SetCrossfader,
     SetEQ,
+    SetFilter,
+    SetFx,
+    SetPitch,
     Sync,
 )
 
@@ -143,13 +146,95 @@ RULES: list[tuple[re.Pattern[str], Callable[[re.Match[str]], DJAction]]] = [
         lambda m: Sync(deck=int(m["deck"])),
     ),
 
-    # "stop loop" / "kill loop" / "exit loop" / "turn off loop" (deck 1 default)
+    # "stop loop" / "kill loop" / "exit loop" / "turn off loop" (deck 1 default).
+    # Re-firing the most recent loop's note toggles it off; the regex doesn't
+    # know which size was active, so it picks 8 — the canonical default. If
+    # the user's loop was a different size, this misses the toggle and lands
+    # a fresh 8-beat loop. Demo-acceptable; LLM gets the same default.
     (
         re.compile(
             r"^(?:stop|kill|exit|end|turn\s+off)\s+(?:the\s+)?loop"
             r"(?:\s+on\s+deck\s+(?P<deck>[12]))?\s*$"
         ),
         lambda m: LoopDeck(deck=int(m["deck"] or 1), beats=8),
+    ),
+
+    # --- v0.3 action vocabulary (D-022) ---
+
+    # Filter — single knob, value 0..1 with 0.5 = bypass.
+    # "low pass deck 1" → value 0.0 (full LPF)
+    # "high pass deck 1" → value 1.0 (full HPF)
+    # "filter off [on deck N]" / "no filter" → 0.5 (bypass)
+    (
+        re.compile(
+            r"^low\s*[-]?\s*pass(?:\s+(?:on\s+)?deck\s+(?P<deck>[12]))?\s*$"
+        ),
+        lambda m: SetFilter(deck=int(m["deck"] or 1), value=0.0),
+    ),
+    (
+        re.compile(
+            r"^high\s*[-]?\s*pass(?:\s+(?:on\s+)?deck\s+(?P<deck>[12]))?\s*$"
+        ),
+        lambda m: SetFilter(deck=int(m["deck"] or 1), value=1.0),
+    ),
+    (
+        re.compile(
+            r"^(?:filter\s+off|no\s+filter|reset\s+filter|filter\s+bypass)"
+            r"(?:\s+(?:on\s+)?deck\s+(?P<deck>[12]))?\s*$"
+        ),
+        lambda m: SetFilter(deck=int(m["deck"] or 1), value=0.5),
+    ),
+
+    # FX — "fx 1 to 50% on deck 2" / "fx2 wet 80%" / "kill fx 1 on deck 1"
+    (
+        re.compile(
+            r"^(?:fx|effect)\s*(?P<unit>[12])"
+            r"(?:\s+wet)?\s+(?:to\s+)?(?P<pct>\d{1,3})\s*%"
+            r"(?:\s+(?:on\s+)?deck\s+(?P<deck>[12]))?\s*$"
+        ),
+        lambda m: SetFx(
+            deck=int(m["deck"] or 1),
+            unit=int(m["unit"]),  # type: ignore[arg-type]
+            value=max(0.0, min(1.0, int(m["pct"]) / 100)),
+        ),
+    ),
+    (
+        re.compile(
+            r"^(?:kill|cut|stop|remove|no|off)\s+(?:the\s+)?"
+            r"(?:fx|effect)\s*(?P<unit>[12])"
+            r"(?:\s+(?:on\s+)?deck\s+(?P<deck>[12]))?\s*$"
+        ),
+        lambda m: SetFx(
+            deck=int(m["deck"] or 1),
+            unit=int(m["unit"]),  # type: ignore[arg-type]
+            value=0.0,
+        ),
+    ),
+
+    # Pitch — "pitch deck 1 up [N percent]" / "pitch up 4%" / "reset pitch"
+    # No percent → full direction (±1.0). With percent, scale ±8% range to ±1.0.
+    (
+        re.compile(
+            r"^pitch(?:\s+(?:on\s+)?deck\s+(?P<deck>[12]))?"
+            r"\s+(?P<dir>up|down)"
+            r"(?:\s+(?P<pct>\d+(?:\.\d+)?)\s*%?)?\s*$"
+        ),
+        lambda m: SetPitch(
+            deck=int(m["deck"] or 1),
+            # Mixxx's default rate range is ±8%. If user says "up 4%" we map
+            # to +0.5 (half the slider). Bare "pitch up" → full +1.0.
+            value=(
+                (1.0 if m["dir"] == "up" else -1.0)
+                * (min(float(m["pct"]) / 8.0, 1.0) if m["pct"] else 1.0)
+            ),
+        ),
+    ),
+    (
+        re.compile(
+            r"^(?:reset|zero|neutral)\s+pitch"
+            r"(?:\s+(?:on\s+)?deck\s+(?P<deck>[12]))?\s*$"
+        ),
+        lambda m: SetPitch(deck=int(m["deck"] or 1), value=0.0),
     ),
 ]
 

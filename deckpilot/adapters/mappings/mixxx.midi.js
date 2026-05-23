@@ -142,6 +142,61 @@ DeckPilot.requestState = function(channel, control, value, status, group) {
 // We only act when value > 0 (the press) and ignore the release. The Python
 // adapter only ever sends a press, but this guards against unexpected resets.
 
+// --- Pitch (bipolar CC → ±1.0 rate) ---------------------------------------
+//
+// Mixxx's `rate` is -1..+1 (full pitch range, default ±8%). MIDI CC is 0..127.
+// We center on 64 — CC 64 → rate 0.0 (no pitch shift). Below 64 = pitch down,
+// above 64 = pitch up. Both halves use 63 steps so the scaling is symmetric.
+
+DeckPilot._setRate = function(group, value) {
+    var rate = (value - 64) / 63;
+    if (rate < -1) rate = -1;
+    if (rate > 1)  rate = 1;
+    engine.setValue(group, "rate", rate);
+};
+
+DeckPilot.setPitch1 = function(channel, control, value, status, group) {
+    DeckPilot._setRate("[Channel1]", value);
+};
+
+DeckPilot.setPitch2 = function(channel, control, value, status, group) {
+    DeckPilot._setRate("[Channel2]", value);
+};
+
+// --- FX wet (per-deck assignment + per-unit mix) --------------------------
+//
+// Mixxx's effect-unit `mix` knob is global per unit; the per-deck "wet"
+// effect is achieved by toggling the unit's group_[ChannelN]_enable
+// assignment. Sending CC 0 disables the assignment (deck is dry on this
+// unit) without disturbing the unit mix; sending >0 enables the assignment
+// AND sets the unit mix. Trade-off: two decks routed to the same unit
+// share the unit mix — documented in D-022.
+
+DeckPilot._setFx = function(unitGroup, channelKey, value) {
+    if (value <= 0) {
+        engine.setValue(unitGroup, channelKey, 0);
+        return;
+    }
+    engine.setValue(unitGroup, channelKey, 1);
+    engine.setValue(unitGroup, "mix", value / 127);
+};
+
+DeckPilot.setFxDeck1Unit1 = function(channel, control, value) {
+    DeckPilot._setFx("[EffectRack1_EffectUnit1]", "group_[Channel1]_enable", value);
+};
+
+DeckPilot.setFxDeck1Unit2 = function(channel, control, value) {
+    DeckPilot._setFx("[EffectRack1_EffectUnit2]", "group_[Channel1]_enable", value);
+};
+
+DeckPilot.setFxDeck2Unit1 = function(channel, control, value) {
+    DeckPilot._setFx("[EffectRack1_EffectUnit1]", "group_[Channel2]_enable", value);
+};
+
+DeckPilot.setFxDeck2Unit2 = function(channel, control, value) {
+    DeckPilot._setFx("[EffectRack1_EffectUnit2]", "group_[Channel2]_enable", value);
+};
+
 DeckPilot.playDeck1 = function(channel, control, value, status, group) {
     if (value > 0) engine.setValue("[Channel1]", "play", 1);
 };
