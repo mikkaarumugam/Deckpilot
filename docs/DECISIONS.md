@@ -6,7 +6,7 @@ matters more than the *what* (the code is the what). Newest first.
 ---
 
 ## D-020 · Stream LLM parses via Server-Sent Events, no API key swap
-**Date:** 2026-05-23 · **Commit:** *(pending)* · **Status: Shipped**
+**Date:** 2026-05-23 · **Commit:** `fa1c2d6` · **Status: Shipped**
 
 **Context.** Post-D-019, LLM parses still felt slow to use: ~2-7s of
 static spinner between Enter and the plan appearing. Profiling on the
@@ -85,7 +85,7 @@ in ~300ms, cold calls in ~1s.
 ---
 
 ## D-019 · GUI auto-load supersedes D-015's suggestion-only path
-**Date:** 2026-05-23 · **Commit:** *(pending)* · **Status: Shipped**
+**Date:** 2026-05-23 · **Commit:** `fa1c2d6` · **Status: Shipped**
 
 **Context.** D-015 (2026-05-22) concluded that Mixxx's controller-script
 API exposes no path-based track load primitive across versions 2.5-2.7,
