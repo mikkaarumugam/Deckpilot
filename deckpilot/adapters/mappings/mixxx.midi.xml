@@ -366,9 +366,11 @@ Binding modes:
 
              Numbering keeps outputs in their own band so we can sniff the wire
              without confusion:
-               - Play state notes: 0x10 (deck 1), 0x11 (deck 2)
-               - BPM CCs:          0x30 (deck 1), 0x31 (deck 2)  (sent from JS)
-               - Position CCs:     0x32 (deck 1), 0x33 (deck 2)  (sent from JS)
+               - Play state notes:    0x10 (deck 1), 0x11 (deck 2)
+               - BPM CCs:             0x30 (deck 1), 0x31 (deck 2)  (sent from JS)
+               - Position CCs:        0x32 (deck 1), 0x33 (deck 2)  (sent from JS)
+               - Active loop size CC: 0x38 (deck 1), 0x39 (deck 2)  (sent from JS;
+                 value = beats {1,2,4,8,16,32} or 0 for no loop)
              Send-side bindings (above) start at 0x14 / 0x3C — no collision. -->
         <!-- =================================================================== -->
         <outputs>

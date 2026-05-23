@@ -31,6 +31,9 @@ BPM_MAX = 200.0
 PLAY_STATE_NOTE = {0x10: 1, 0x11: 2}   # note → deck number
 BPM_CC = {0x30: 1, 0x31: 2}            # cc   → deck number
 POSITION_CC = {0x32: 1, 0x33: 2}       # cc   → deck number
+# CC 0x38/0x39 carries the active loop size verbatim (0 = no loop, else
+# beats). One CC per deck — Mixxx only ever has one loop active per channel.
+LOOP_SIZE_CC = {0x38: 1, 0x39: 2}      # cc   → deck number
 
 DEFAULT_PORT_NAME = "IAC Driver Bus 1"
 
@@ -44,6 +47,11 @@ class DeckState:
     # which is also "no track loaded" since position only fires once
     # a track is on the deck. Resolution is ~1/128 (CC scaling).
     position: float = 0.0
+    # Active beatloop size in beats: 0 = no loop active, else one of
+    # {1, 2, 4, 8, 16, 32}. Sourced from beatloop_X_enabled subscriptions
+    # in mixxx.midi.js. Used by the regex parser to make "stop loop"
+    # fire the matching toggle instead of always guessing 8.
+    loop_beats: int = 0
 
 
 @dataclass(frozen=True)
@@ -198,6 +206,16 @@ class MixxxFeedback:
                 # equality but this guards against future changes there.
                 if abs(prev.position - position) >= 0.005:
                     self._decks[deck] = replace(prev, position=position)
+                    changed = True
+
+        elif kind == 0xB0 and d1 in LOOP_SIZE_CC:
+            deck = LOOP_SIZE_CC[d1]
+            # JS sends the size verbatim — no scaling. 0 means no loop.
+            loop_beats = int(d2)
+            with self._lock:
+                prev = self._decks[deck]
+                if prev.loop_beats != loop_beats:
+                    self._decks[deck] = replace(prev, loop_beats=loop_beats)
                     changed = True
 
         if changed and self._on_change is not None:

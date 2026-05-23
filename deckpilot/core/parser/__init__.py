@@ -57,7 +57,10 @@ def parse(
         raise ValueError(f"unknown parser mode: {mode!r}")
 
     if mode in {"auto", "regex"}:
-        result = regex.parse(text)
+        # deck_state is consulted only by the "stop loop" special case;
+        # forwarding here keeps regex stateful where it needs to be without
+        # the LLM path losing context. See regex.parse docstring.
+        result = regex.parse(text, deck_state=deck_state)
         if result is not None:
             return result
         if mode == "regex":

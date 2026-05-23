@@ -125,9 +125,12 @@ async def parse(req: ParseRequest) -> ParseResponse:
     feedback = get_feedback()
     deck_state = feedback.snapshot() if feedback is not None else None
 
-    # Try regex first (fast-path, in-process, no LLM call).
+    # Try regex first (fast-path, in-process, no LLM call). deck_state is
+    # consulted by the "stop loop" rule so we fire the toggle matching the
+    # active loop size (D-022 follow-up); forwarding it here keeps the
+    # eager regex path on parity with the LLM path.
     if req.mode in ("auto", "regex"):
-        regex_result = regex_parse(req.text)
+        regex_result = regex_parse(req.text, deck_state=deck_state)
         if regex_result is not None:
             return _build_response(req.text, regex_result, source="regex", library=library)
         if req.mode == "regex":

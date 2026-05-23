@@ -49,11 +49,30 @@ var BPM_CC = { "[Channel1]": 0x30, "[Channel2]": 0x31 };
 //   - Value 0..127 scaled linearly from 0.0..1.0
 var POSITION_CC = { "[Channel1]": 0x32, "[Channel2]": 0x33 };
 
+// --- Active loop size output ----------------------------------------------
+//
+// Lets Python's regex parser know which loop size (if any) is currently
+// active on each deck, so "stop loop" can fire the matching toggle instead
+// of always guessing 8. Without this read-back the regex layer is state-
+// blind and would replace a 4-beat loop with an 8-beat one on "stop loop".
+//
+// Wire format:
+//   - CC 0x38 (status 0xB0) = deck 1 active loop size
+//   - CC 0x39 (status 0xB0) = deck 2 active loop size
+//   - Value: 0 = no loop, else one of {1, 2, 4, 8, 16, 32} (beats)
+//
+// One CC per deck instead of one per (deck, size) keeps the wire compact
+// — Mixxx will never have two beatloop sizes active simultaneously on a
+// deck (a new toggle replaces the existing loop).
+var LOOP_SIZE_CC = { "[Channel1]": 0x38, "[Channel2]": 0x39 };
+var LOOP_SIZES = [1, 2, 4, 8, 16, 32];
+
 // Suppress re-sends when the scaled BPM didn't actually change — Mixxx fires
 // the callback on every beatgrid tick which would spam the wire. We keep the
 // last CC value sent per deck and skip duplicates. Same trick for position.
 DeckPilot._lastBpmCc = { "[Channel1]": -1, "[Channel2]": -1 };
 DeckPilot._lastPositionCc = { "[Channel1]": -1, "[Channel2]": -1 };
+DeckPilot._lastLoopSizeCc = { "[Channel1]": -1, "[Channel2]": -1 };
 DeckPilot._connections = [];
 
 DeckPilot._sendBpm = function(group, bpm) {
@@ -65,6 +84,22 @@ DeckPilot._sendBpm = function(group, bpm) {
     if (ccValue === DeckPilot._lastBpmCc[group]) return;
     DeckPilot._lastBpmCc[group] = ccValue;
     midi.sendShortMsg(0xB0, BPM_CC[group], ccValue);
+};
+
+DeckPilot._sendLoopSize = function(group) {
+    // Walk the candidate sizes; the first one whose `beatloop_X_enabled`
+    // is non-zero is the active size. Mixxx invariant: at most one is on.
+    var active = 0;
+    for (var i = 0; i < LOOP_SIZES.length; i++) {
+        var size = LOOP_SIZES[i];
+        if (engine.getValue(group, "beatloop_" + size + "_enabled") > 0) {
+            active = size;
+            break;
+        }
+    }
+    if (active === DeckPilot._lastLoopSizeCc[group]) return;
+    DeckPilot._lastLoopSizeCc[group] = active;
+    midi.sendShortMsg(0xB0, LOOP_SIZE_CC[group], active);
 };
 
 DeckPilot._sendPosition = function(group, pos) {
@@ -100,6 +135,17 @@ DeckPilot.init = function(id, debug) {
             DeckPilot._sendPosition(group, value);
         });
         if (posConn) DeckPilot._connections.push(posConn);
+
+        // Subscribe to every candidate loop size's _enabled flag. Whenever
+        // any of them flips, recompute and emit the per-deck active size.
+        // Closure captures `group` so the right deck CC fires.
+        LOOP_SIZES.forEach(function(size) {
+            var key = "beatloop_" + size + "_enabled";
+            var conn = engine.makeConnection(group, key, function() {
+                DeckPilot._sendLoopSize(group);
+            });
+            if (conn) DeckPilot._connections.push(conn);
+        });
     });
 };
 
@@ -127,6 +173,9 @@ DeckPilot._broadcastState = function() {
 
         DeckPilot._lastPositionCc[group] = -1;
         DeckPilot._sendPosition(group, engine.getValue(group, "playposition"));
+
+        DeckPilot._lastLoopSizeCc[group] = -1;
+        DeckPilot._sendLoopSize(group);
     });
 };
 

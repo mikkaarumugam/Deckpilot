@@ -16,9 +16,10 @@ Adding a new rule:
 from __future__ import annotations
 
 import re
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from deckpilot.core.actions import (
+    LOOP_BEAT_SIZES,
     ActionPlan,
     DJAction,
     FadeToDeck,
@@ -33,6 +34,9 @@ from deckpilot.core.actions import (
     SetPitch,
     Sync,
 )
+
+if TYPE_CHECKING:
+    from deckpilot.adapters.midi_feedback import MixxxState
 
 
 def _band(name: str) -> str:
@@ -146,18 +150,9 @@ RULES: list[tuple[re.Pattern[str], Callable[[re.Match[str]], DJAction]]] = [
         lambda m: Sync(deck=int(m["deck"])),
     ),
 
-    # "stop loop" / "kill loop" / "exit loop" / "turn off loop" (deck 1 default).
-    # Re-firing the most recent loop's note toggles it off; the regex doesn't
-    # know which size was active, so it picks 8 — the canonical default. If
-    # the user's loop was a different size, this misses the toggle and lands
-    # a fresh 8-beat loop. Demo-acceptable; LLM gets the same default.
-    (
-        re.compile(
-            r"^(?:stop|kill|exit|end|turn\s+off)\s+(?:the\s+)?loop"
-            r"(?:\s+on\s+deck\s+(?P<deck>[12]))?\s*$"
-        ),
-        lambda m: LoopDeck(deck=int(m["deck"] or 1), beats=8),
-    ),
+    # NOTE: "stop loop" / "kill loop" are handled by parse() as a special
+    # case BEFORE this rule list runs — they need MixxxState to fire the
+    # matching toggle for the active size. See _STOP_LOOP_PATTERN below.
 
     # --- v0.3 action vocabulary (D-022) ---
 
@@ -239,9 +234,41 @@ RULES: list[tuple[re.Pattern[str], Callable[[re.Match[str]], DJAction]]] = [
 ]
 
 
-def parse(text: str) -> ActionPlan | None:
-    """Return a 1-step ActionPlan if a rule matches, else None."""
+# "stop loop" needs feedback to fire the matching size's toggle. Pre-empted
+# from RULES so we can consult deck_state before deciding which beats arg
+# to emit. Without state we fall back to the v0.1 default (8 beats).
+_STOP_LOOP_PATTERN = re.compile(
+    r"^(?:stop|kill|exit|end|turn\s+off)\s+(?:the\s+)?loop"
+    r"(?:\s+on\s+deck\s+(?P<deck>[12]))?\s*$"
+)
+_STOP_LOOP_DEFAULT_BEATS = 8
+
+
+def parse(
+    text: str,
+    *,
+    deck_state: "MixxxState | None" = None,
+) -> ActionPlan | None:
+    """Return a 1-step ActionPlan if a rule matches, else None.
+
+    `deck_state` is consulted only for the "stop loop" phrasing — toggling
+    the matching beatloop_N is the only way Mixxx ends a loop. When state
+    is unavailable we default to 8 beats (matches the old v0.1 behaviour);
+    when it IS available, we fire the toggle for whatever size is active.
+    All other rules are pure functions of the text.
+    """
     normalized = text.strip().lower()
+
+    stop_match = _STOP_LOOP_PATTERN.match(normalized)
+    if stop_match is not None:
+        deck = int(stop_match["deck"] or 1)
+        beats = _STOP_LOOP_DEFAULT_BEATS
+        if deck_state is not None:
+            active = deck_state.deck(deck).loop_beats
+            if active in LOOP_BEAT_SIZES:
+                beats = active
+        return ActionPlan.single(LoopDeck(deck=deck, beats=beats))
+
     for pattern, factory in RULES:
         match = pattern.match(normalized)
         if match is not None:

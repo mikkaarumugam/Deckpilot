@@ -86,12 +86,14 @@ or an unhelpful error). New tests bring the regex parser from 47 →
   code outside `tests/` already passed plausible sizes so this is a
   bug-fix, not a regression. Codified as `LOOP_BEAT_SIZES = (1, 2, 4,
   8, 16, 32)` — sizes outside this set raise.
-- The "stop loop" regex still defaults to `beats=8` regardless of which
-  size is active, because the regex layer has no state read-back. If
-  the user runs a 4-beat loop and then says "kill loop", we fire the
-  8-beat toggle and Mixxx interprets that as "start an 8-beat loop"
-  rather than ending the 4-beat one. Mitigation deferred to v0.4
-  (would require feedback-driven regex routing).
+- ~~The "stop loop" regex still defaults to `beats=8` regardless of which
+  size is active~~ — addressed in the same commit: a new scripted output
+  (CC `0x38`/`0x39`) reports the active beatloop size per deck, and
+  `regex.parse` consults `deck_state.deck(N).loop_beats` when emitting
+  the stop-loop toggle. With state, "kill loop" while a 4-beat loop is
+  active fires `beatloop_4_toggle` (the right thing). Without state
+  (eval harness, CLI tests, Mixxx not running) we fall back to the v0.1
+  default of 8 beats — same behaviour as before for those callers.
 
 **Status.** Shipped 2026-05-24. After this, the parser covers the
 typical bedroom-DJ vocabulary at regex speed and the LLM has the full

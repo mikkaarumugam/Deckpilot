@@ -149,6 +149,51 @@ def test_regex_parse_misses(text: str) -> None:
     assert regex.parse(text) is None
 
 
+# --- Stop-loop is state-aware (D-022 follow-up) ---
+#
+# With deck_state available, "stop loop" fires the toggle for whichever
+# beatloop size Mixxx says is active — otherwise we'd start a fresh 8-beat
+# loop instead of ending the active one.
+
+def _state_with_loop(deck: int, beats: int):
+    """Build a minimal MixxxState carrying just a loop_beats value.
+    Importing inside the helper avoids a hard rtmidi dependency at
+    module collection time (the import chain pulls in rtmidi otherwise)."""
+    from deckpilot.adapters.midi_feedback import DeckState, MixxxState
+    return MixxxState(decks={deck: DeckState(loop_beats=beats),
+                              (2 if deck == 1 else 1): DeckState()})
+
+
+@pytest.mark.parametrize("active, expected_beats", [
+    (0, 8),    # no loop active → fall back to default
+    (1, 1),
+    (4, 4),
+    (16, 16),
+    (32, 32),
+])
+def test_stop_loop_uses_active_size_when_state_present(
+    active: int, expected_beats: int
+) -> None:
+    state = _state_with_loop(deck=1, beats=active)
+    plan = regex.parse("stop loop", deck_state=state)
+    assert plan is not None
+    assert plan.steps[0].action == LoopDeck(deck=1, beats=expected_beats)
+
+
+def test_stop_loop_without_state_keeps_v01_default() -> None:
+    plan = regex.parse("kill loop")
+    assert plan is not None
+    assert plan.steps[0].action == LoopDeck(deck=1, beats=8)
+
+
+def test_stop_loop_unknown_active_size_falls_back() -> None:
+    # If the wire somehow reports an out-of-range size, don't trust it.
+    state = _state_with_loop(deck=1, beats=7)
+    plan = regex.parse("stop loop", deck_state=state)
+    assert plan is not None
+    assert plan.steps[0].action == LoopDeck(deck=1, beats=8)
+
+
 # --- Facade behavior ---
 
 def test_facade_regex_mode_raises_on_miss() -> None:

@@ -116,8 +116,10 @@ in DECISIONS as P2.
 - Crossfader undo snaps to 0.5, not the precise prior value.
 - ~~LoopDeck always uses 8 beats regardless of user's `beats` parameter~~
   — fixed in D-022. Sizes {1, 2, 4, 8, 16, 32} now bound; others raise.
-- "stop loop" regex still defaults to beats=8 even if a different size
-  is active (no state read-back in the regex layer). See D-022.
+- ~~"stop loop" regex still defaults to beats=8 even if a different size
+  is active~~ — fixed in D-022 follow-up via active-loop-size scripted
+  output (CC 0x38/0x39). Without state (CLI / eval) we still fall back
+  to 8 beats; that's the same as v0.1.
 - FX unit mix is global per unit; routing both decks to the same unit
   shares the wet level. See D-022.
 - Nudge/HotCue/Sync have no clean undo.
