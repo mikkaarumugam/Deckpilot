@@ -6,7 +6,7 @@ matters more than the *what* (the code is the what). Newest first.
 ---
 
 ## D-021 · Agent layer (Tier 2, demo-scoped) — goal-directed schedules
-**Date:** 2026-05-23 · **Commit:** *(pending)* · **Status: Shipped**
+**Date:** 2026-05-23 · **Commit:** `a1a5327` · **Status: Shipped**
 
 **Context.** Through D-020 the system was still a *smart MIDI controller*:
 text in → ActionPlan → executor runs it → silence. Every action required
