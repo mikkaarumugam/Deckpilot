@@ -120,6 +120,14 @@ class ParseResponse(BaseModel):
 
 class ParseRequest(BaseModel):
     text: str
+    # mode="auto" (default) runs regex first, falls through to LLM.
+    # mode="regex" runs only the regex parser — used by the frontend's
+    # eager-on-each-keystroke flow so we don't spawn an LLM subprocess
+    # for every character typed. Returns error="no_regex_match" sentinel
+    # if regex doesn't hit, so the UI can render a "press Enter to ask
+    # Haiku" hint without treating it as a real failure.
+    # mode="llm" skips regex (rarely needed).
+    mode: Literal["auto", "regex", "llm"] = "auto"
 
 
 # ── Execute / undo / reset ───────────────────────────────────────────────

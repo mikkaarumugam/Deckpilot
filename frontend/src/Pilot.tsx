@@ -1,74 +1,56 @@
 /**
- * Pilot — the main app shell. Composes everything.
+ * Pilot — main app shell. Phase 4 version (real backend-driven).
  *
- * Layout (top to bottom):
+ * Replaces the auto-cycling demo from Phase 2 with:
+ *   - User-driven typing via the new usePilotFlow (debounced parse,
+ *     real run, real history).
+ *   - Live deck state from useDeckState (polls GET /state at 250ms).
+ *   - Real history sourced from the hook.
+ *   - Suggestion card rendered inline in CommandCard when /parse
+ *     returns a LoadTrack suggestion.
  *
- *   Topbar: logo + connected status pulse + Deploy
- *   Scrollable content:
- *     • CommandCard (hero — typing → parsing → ready → running → done)
- *     • Try chips (preset commands the user can fire with one click)
- *     • Live state (two DeckCards side by side)
- *     • Queue (pending commands waiting to be run)
- *     • History (completed commands with undo)
- *   Footer: version + history-clear + reset Mixxx + cmd-K search
+ * Try chips set the input text directly — same flow as if the user
+ * typed it.
  *
- * For Phase 2 the queue and history are static mocks pulled from the design.
- * Phase 4 will wire them to real state coming from the backend.
- *
- * The phase machine is driven by usePilotFlow (currently the auto-cycling
- * demo cycle ported from the design; Phase 4 rewrites it to be real).
+ * Queue stays mocked for now (D-018 day-1 non-goal). The Reset button
+ * in the footer is wired up; clear history is local-state only.
  */
+
+import { useState } from 'react';
 
 import { CommandCard } from './components/CommandCard';
 import { DeckCard } from './components/DeckCard';
 import { HistoryItem } from './components/HistoryItem';
 import { Chip } from './components/Chip';
+import { useDeckState } from './hooks/useDeckState';
 import { usePilotFlow } from './hooks/usePilotFlow';
 
-// Hardcoded queue + history for Phase 2 visual parity. Replaced in Phase 4.
-const MOCK_QUEUE = [
-  { n: 1, text: 'bass swap into deck 2 over 4 seconds', parsed: 'swap.bass(deck:2, t:4s)' },
-  { n: 2, text: 'loop deck 1 for 8 beats', parsed: 'loop(deck:1, beats:8)' },
-  { n: 3, text: 'ease crossfader to center over 8 beats', parsed: 'crossfade(target:0, beats:8)' },
-];
+const PRESET_CHIPS = [
+  { label: 'play deck 1', kbd: '1' },
+  { label: 'kill the bass on deck 1', kbd: '2' },
+  { label: 'bass swap into deck 2 over 4 seconds', kbd: '3' },
+] as const;
 
-const MOCK_HISTORY = [
-  {
-    when: '2s ago',
-    prompt: 'kill the bass on deck 1',
-    parsed: 'eq.low(deck:1) = -inf',
-    summary: 'Deck 1 low-band cut.',
-    diff: { from: '0.0 dB', to: '−∞' },
-    isNew: true,
-  },
-  {
-    when: '14s ago',
-    prompt: 'match deck 2 tempo to deck 1',
-    parsed: 'tempo.sync(deck:2 → deck:1)',
-    summary: 'Deck 2 tempo nudged to match Deck 1.',
-    diff: { from: '124.0 BPM', to: '116.2 BPM' },
-  },
-  {
-    when: '48s ago',
-    prompt: 'play deck 1',
-    parsed: 'transport.play(deck:1)',
-    summary: 'Started playback on Deck 1 at cue 0:00.',
-  },
-  {
-    when: '2m ago',
-    prompt: 'load berlioz la danse on deck 1',
-    parsed: "library.load(deck:1, q:'berlioz la danse')",
-    summary: 'Loaded 1 of 3 matches — Berlioz, La Danse · 4:18.',
-  },
-];
+// Queue stays mocked for day-1 (D-018 non-goal). Removed when Phase 4+ adds
+// real queue execution.
+const MOCK_QUEUE: { n: number; text: string; parsed: string }[] = [];
 
 export function Pilot() {
   const flow = usePilotFlow();
-  const { phase, typed, example, exampleIdx, revealed, executed } = flow;
+  const stateSnapshot = useDeckState();
+  const [historyCleared, setHistoryCleared] = useState(false);
 
-  // Once we leave the typing phase, show the full text immediately.
-  const typedShown = phase === 'typing' ? example.text.slice(0, typed) : example.text;
-  const showCursor = phase === 'typing';
+  const decks = stateSnapshot?.decks ?? [
+    { n: 1 as const, status: 'cued' as const, bpm: 0, track: null, progress: { t: '—', total: '—', pct: 0 } },
+    { n: 2 as const, status: 'cued' as const, bpm: 0, track: null, progress: { t: '—', total: '—', pct: 0 } },
+  ];
+
+  const bpmDeltaLabel =
+    typeof stateSnapshot?.bpm_delta === 'number'
+      ? `${stateSnapshot.bpm_delta >= 0 ? '+' : ''}${stateSnapshot.bpm_delta.toFixed(1)} BPM`
+      : '—';
+
+  const history = historyCleared ? [] : flow.history;
 
   return (
     <div
@@ -84,7 +66,7 @@ export function Pilot() {
         flexDirection: 'column',
       }}
     >
-      {/* Ambient accent glow at the top */}
+      {/* Ambient accent glow */}
       <div
         style={{
           position: 'absolute',
@@ -125,7 +107,7 @@ export function Pilot() {
               alignItems: 'center',
               gap: 7,
               font: '500 11px/1 var(--p-mono)',
-              color: 'var(--p-muted)',
+              color: stateSnapshot ? 'var(--p-muted)' : 'var(--p-muted-deep)',
               letterSpacing: '0.06em',
             }}
           >
@@ -134,31 +116,28 @@ export function Pilot() {
                 width: 6,
                 height: 6,
                 borderRadius: 99,
-                background: 'var(--p-live)',
-                boxShadow: '0 0 8px var(--p-live)',
-                animation: 'pilotPulse 2s ease-in-out infinite',
+                background: stateSnapshot ? 'var(--p-live)' : 'var(--p-muted)',
+                boxShadow: stateSnapshot ? '0 0 8px var(--p-live)' : 'none',
+                animation: stateSnapshot ? 'pilotPulse 2s ease-in-out infinite' : 'none',
               }}
             />
-            <span>connected</span>
-            <span style={{ color: 'var(--p-muted-deep)' }}>·</span>
-            <span>32ms</span>
+            <span>{stateSnapshot ? 'connected' : 'connecting…'}</span>
           </div>
-          <button className="pilot-deploy" type="button">Deploy</button>
         </div>
       </div>
 
       {/* Scrollable content */}
       <div style={{ flex: 1, padding: '32px 28px 24px', overflow: 'auto', position: 'relative' }}>
         <CommandCard
-          phase={phase}
-          typedText={typedShown}
-          showCursor={showCursor}
-          parsed={example.parsed}
-          conf={example.conf}
-          plan={example.plan}
-          revealed={revealed}
-          executed={executed}
-          exampleIdx={exampleIdx}
+          phase={flow.phase}
+          text={flow.text}
+          onTextChange={flow.setText}
+          parseResult={flow.parseResult}
+          executed={flow.executed}
+          error={flow.error}
+          suggestion={flow.suggestion}
+          regexMissed={flow.regexMissed}
+          onSubmit={flow.onSubmit}
         />
 
         {/* Try chips */}
@@ -175,9 +154,11 @@ export function Pilot() {
             Try
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <Chip kbd="1">kill the bass on deck 1</Chip>
-            <Chip kbd="2">bass swap into deck 2 over 4s</Chip>
-            <Chip kbd="3">match tempo</Chip>
+            {PRESET_CHIPS.map((c) => (
+              <Chip key={c.kbd} kbd={c.kbd} onClick={() => flow.setText(c.label)}>
+                {c.label}
+              </Chip>
+            ))}
           </div>
         </div>
 
@@ -202,80 +183,71 @@ export function Pilot() {
               Live state
             </div>
             <div style={{ font: '400 11.5px/1 var(--p-mono)', color: 'var(--p-muted-deep)' }}>
-              crossfade · centre   ∆ −5.5 bpm
+              ∆ {bpmDeltaLabel}
             </div>
           </div>
           <div style={{ display: 'flex', gap: 14 }}>
-            <DeckCard
-              n={1}
-              track="La Danse"
-              artist="Berlioz"
-              bpm={116.2}
-              keySig="Am"
-              status="paused"
-              progress={{ t: '1:42', total: '4:18', pct: 39 }}
-            />
-            <DeckCard
-              n={2}
-              track="Around The World"
-              artist="Daft Punk"
-              bpm={121.7}
-              keySig="Dm"
-              status="paused"
-              progress={{ t: '0:00', total: '7:09', pct: 0 }}
-            />
+            {decks.map((d) => (
+              <DeckCard
+                key={d.n}
+                n={d.n}
+                track={d.track?.title ?? '(no track)'}
+                artist={d.track?.artist ?? '—'}
+                bpm={d.bpm > 0 ? d.bpm : 0}
+                keySig={d.track?.key || '—'}
+                status={d.status}
+                progress={d.progress}
+              />
+            ))}
           </div>
         </div>
 
-        {/* Queue */}
-        <div style={{ marginBottom: 28 }}>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'baseline',
-              justifyContent: 'space-between',
-              marginBottom: 14,
-            }}
-          >
+        {/* Queue — mocked for day-1 */}
+        {MOCK_QUEUE.length > 0 && (
+          <div style={{ marginBottom: 28 }}>
             <div
               style={{
                 font: '500 10px/1 var(--p-mono)',
                 color: 'var(--p-muted)',
                 letterSpacing: '0.18em',
+                marginBottom: 12,
                 textTransform: 'uppercase',
               }}
             >
               Queue · {MOCK_QUEUE.length} pending
             </div>
-            <div style={{ font: '400 11.5px/1 var(--p-mono)', color: 'var(--p-accent)', cursor: 'pointer' }}>
-              run all ▸
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {MOCK_QUEUE.map((q) => (
+                <div
+                  key={q.n}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 14,
+                    padding: '10px 14px',
+                    background: 'var(--p-surface)',
+                    border: '1px solid var(--p-border)',
+                    borderRadius: 10,
+                  }}
+                >
+                  <span style={{ font: '500 10px/1 var(--p-mono)', color: 'var(--p-muted-deep)', width: 14 }}>
+                    {q.n}
+                  </span>
+                  <span
+                    style={{
+                      font: 'italic 400 14.5px/1.2 var(--p-serif)',
+                      color: 'var(--p-fg)',
+                      flex: 1,
+                    }}
+                  >
+                    {q.text}
+                  </span>
+                  <span style={{ font: '500 11px/1 var(--p-mono)', color: 'var(--p-muted)' }}>{q.parsed}</span>
+                </div>
+              ))}
             </div>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {MOCK_QUEUE.map((q) => (
-              <div
-                key={q.n}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 14,
-                  padding: '10px 14px',
-                  background: 'var(--p-surface)',
-                  border: '1px solid var(--p-border)',
-                  borderRadius: 10,
-                }}
-              >
-                <span style={{ font: '500 10px/1 var(--p-mono)', color: 'var(--p-muted-deep)', width: 14 }}>
-                  {q.n}
-                </span>
-                <span style={{ font: 'italic 400 14.5px/1.2 var(--p-serif)', color: 'var(--p-fg)', flex: 1 }}>
-                  {q.text}
-                </span>
-                <span style={{ font: '500 11px/1 var(--p-mono)', color: 'var(--p-muted)' }}>{q.parsed}</span>
-              </div>
-            ))}
-          </div>
-        </div>
+        )}
 
         {/* History */}
         <div style={{ marginBottom: 24 }}>
@@ -298,13 +270,33 @@ export function Pilot() {
               History · click ↶ to undo
             </div>
             <div style={{ font: '400 11.5px/1 var(--p-mono)', color: 'var(--p-muted-deep)' }}>
-              {MOCK_HISTORY.length} commands · clear
+              {history.length} command{history.length === 1 ? '' : 's'} ·{' '}
+              <span
+                onClick={() => setHistoryCleared(true)}
+                style={{ cursor: 'pointer', color: 'var(--p-muted)' }}
+              >
+                clear
+              </span>
             </div>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {MOCK_HISTORY.map((h, i) => (
-              <HistoryItem key={i} {...h} />
-            ))}
+            {history.length === 0 ? (
+              <div
+                style={{
+                  padding: '14px 16px',
+                  font: '400 12.5px/1.4 var(--p-sans)',
+                  color: 'var(--p-muted-deep)',
+                  background: 'var(--p-surface)',
+                  border: '1px dashed var(--p-border)',
+                  borderRadius: 12,
+                  textAlign: 'center',
+                }}
+              >
+                Run a command to see it here.
+              </div>
+            ) : (
+              history.map((h, i) => <HistoryItem key={`${h.when}-${i}`} {...h} />)
+            )}
           </div>
         </div>
       </div>
@@ -321,11 +313,14 @@ export function Pilot() {
           color: 'var(--p-muted-deep)',
         }}
       >
-        <span>DeckPilot · v0.1.0</span>
+        <span>DeckPilot · v0.2.0</span>
         <div style={{ display: 'flex', gap: 18 }}>
-          <span>Clear history</span>
-          <span style={{ color: 'var(--p-muted)' }}>Reset Mixxx</span>
-          <span>⌘ K · search</span>
+          <span style={{ cursor: 'pointer' }} onClick={() => setHistoryCleared(true)}>
+            Clear history
+          </span>
+          <span style={{ cursor: 'pointer', color: 'var(--p-muted)' }} onClick={flow.onReset}>
+            Reset Mixxx
+          </span>
         </div>
       </div>
     </div>

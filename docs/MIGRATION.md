@@ -146,24 +146,37 @@ design canvas verified.
       - GET /state → both decks identified with live BPM + library lookup
       - POST /parse "play deck 1" → regex path, ~5ms, valid JSON
       - POST /parse "kill the bass on deck 1" → regex path, valid JSON
-- [ ] Commit: `feat(backend): FastAPI wrapping deckpilot/`
+- [x] Commit: `feat(backend): Phase 3 — FastAPI wrapping deckpilot/ over HTTP` (`52deaa8`)
 
-### Phase 4 — Wire frontend to backend (1-2h)
-- [ ] `frontend/src/api/client.ts` — typed fetch wrappers for /parse, /execute,
-      /state, /undo, /reset. Use Vite proxy or absolute URL with CORS.
-- [ ] `frontend/src/hooks/usePilotFlow.ts` — REAL state machine: typing →
-      debounce 350ms → parse → ready → run → executing → done. NOT auto-loop.
-      Phase transitions driven by API responses, not setTimeouts.
-- [ ] `frontend/src/hooks/useDeckState.ts` — polls GET /state every 250ms;
-      returns `{ decks, crossfade, bpmDelta }` for the DeckCards.
-- [ ] Plug into `<Pilot>`: typed text from input goes into usePilotFlow.parse,
-      run button triggers execute, history feeds from response, deck state
-      from useDeckState.
-- [ ] LoadTrackSuggestion response renders the suggestion variant of the
-      command card (or a sibling card — match the design vocabulary).
-- [ ] Streamlit dashboard's existing UX patterns preserved: plan-visible-
-      before-audible, one-click undo, history shows parsed signatures.
-- [ ] Commit: `feat: wire React UI to FastAPI backend`
+### Phase 4 — Wire frontend to backend (1-2h) ✅
+Two iterations:
+- v1 wired eager parse on every keystroke (LLM included). User noticed it
+  was firing Haiku on intermediate drafts — wasteful + confusing.
+- v2 = **Pattern C** (regex eager, LLM on Enter). New `ParseRequest.mode`
+  field on the backend; `mode="regex"` returns a `no_regex_match` sentinel
+  when no rule hits, so the UI can render a hint instead of an error.
+
+- [x] `backend/models.py` + `backend/routes/parse.py` — `ParseRequest.mode`
+      with "auto" / "regex" / "llm" values
+- [x] `frontend/src/api/client.ts` — typed fetch wrappers for /parse,
+      /execute, /state, /undo, /reset
+- [x] `frontend/src/hooks/usePilotFlow.ts` — REAL Pattern C state machine:
+      regex on each keystroke (debounced 150ms), LLM only on Enter; Enter
+      is overloaded as "parse via LLM" OR "run plan" depending on state
+- [x] `frontend/src/hooks/useDeckState.ts` — polls GET /state every 250ms
+- [x] CommandCard takes a real text input + handles Enter via onSubmit;
+      shows "(press ⏎ to ask Haiku)" hint when regex misses (gated to ≥4
+      chars to avoid flickering during typing)
+- [x] Pilot renders live DeckCards from useDeckState; sources history,
+      reset, suggestion handling from usePilotFlow
+- [x] LoadTrack suggestions render the SuggestionPanel inside CommandCard;
+      Run button can't fire on a suggestion
+- [x] Bumped suggestion card font sizes (reasoning 14.5px serif; caveat
+      12.5px mono; chips 12px mono) for legibility
+- [x] `npm run build` passes: 29 modules, 215KB bundle
+- [x] Manual e2e: regex commands fire instantly; LLM commands wait for
+      Enter; suggestion card renders correctly with reasoning visible
+- [ ] Commit: `feat: wire React UI to FastAPI backend (Pattern C)`
 
 ### Phase 5 — End-to-end testing + suggestion card (1-2h)
 Run Mixxx + FastAPI + Vite dev all at once. Manually test in this order:

@@ -1,178 +1,330 @@
 /**
- * usePilotFlow — drives the phase machine + the demoable examples.
+ * usePilotFlow — Pattern C state machine (regex eager, LLM on Enter).
  *
- * **PHASE 2 IMPLEMENTATION** — the auto-cycling demo state machine, ported
- * straight from design/pilot.jsx (lines 122-210). This is intentionally a
- * fake flow that cycles through 4 hardcoded examples so the component
- * visuals can be verified without a backend.
+ * Flow:
  *
- * **PHASE 4 WILL REPLACE THIS** with real wiring:
+ *   typing  ← user edits the input. setText fires `api.parse(text, "regex")`
+ *             debounced ~150ms. Regex is in-process + free + instant, so we
+ *             can call it on nearly every keystroke without cost.
  *
- *   typing  ← user input (debounced)
- *   parsing ← POST /parse  (FastAPI, wraps deckpilot.core.parser.parse)
- *   ready   ← parse response received
- *   running ← POST /execute (executor walks the plan, MIDI fires)
- *   done    ← all steps completed (polled via GET /state)
+ *   ready   ← regex matched. Plan is renderable. User can hit Run.
  *
- * Keep the same {phase, typed, revealed, executed, elapsed, example, exampleIdx}
- * shape so CommandCard + Pilot don't change between phases. Only this hook's
- * body is rewritten in Phase 4.
+ *   parsing ← user pressed Enter on text that regex didn't match. We
+ *             fire `api.parse(text, "auto")` which goes through the LLM.
+ *             3-12s wait while Haiku thinks.
+ *
+ *   running ← user pressed Run on a ready plan. POST /execute fires;
+ *             client-side step timer advances the visual progress.
+ *
+ *   done    ← execute returned success.
+ *
+ * Key design points (different from Phase 4 v1):
+ *
+ * 1. **No eager LLM.** Typing never triggers Haiku. The user has to press
+ *    Enter on a paraphrase to opt in. Eliminates wasted LLM calls on
+ *    intermediate drafts.
+ *
+ * 2. **Regex-only mode** returns `error="no_regex_match"` as a sentinel —
+ *    not a real failure. We expose it via `regexMissed` so the UI can
+ *    show a "press ⏎ to ask Haiku" hint instead of a red error toast.
+ *
+ * 3. **Enter is overloaded.**
+ *    - If parseResult has a runnable plan → run it.
+ *    - If parseResult is null + text non-empty → fire LLM parse.
+ *    - If text is empty → no-op.
+ *
+ *    Pattern shared with Cursor compose / many AI editors.
+ *
+ * 4. **Stale results clear cleanly.** Whenever the regex parse comes
+ *    back as no-match, we null out parseResult. No ghost-state from
+ *    the previous command lingers.
  */
 
-import { useEffect, useRef, useState } from 'react';
-import { type Phase, type PlanStepData } from '../types';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  api,
+  type ParseResponse,
+  type SuggestionPayload,
+} from '../api/client';
+import { type HistoryEntry, type Phase } from '../types';
 
-export interface PilotExample {
-  text: string;
-  parsed: string;
-  conf: number;
-  affects: string;
-  plan: PlanStepData[];
-}
+const REGEX_DEBOUNCE_MS = 150;
 
-// Hardcoded examples lifted verbatim from design/pilot.jsx lines 76-118 so the
-// visuals match the design canvas exactly. Phase 4 will source these via the
-// real parser; this list disappears entirely at that point.
-const PILOT_EXAMPLES: PilotExample[] = [
-  {
-    text: 'bass swap into deck 2 over 4 seconds',
-    parsed: 'swap.bass(deck:1 → deck:2, t:4s)',
-    conf: 96,
-    affects: 'deck 1 · deck 2',
-    plan: [
-      { fn: 'eq.low(deck:1)', detail: 'ramp  0.0 dB  →  −∞', t: '4.0s', dMs: 780 },
-      { fn: 'eq.low(deck:2)', detail: 'ramp  −∞  →  0.0 dB', t: '4.0s', dMs: 780 },
-      { fn: 'crossfade', detail: 'target  −100  →  +100', t: '4.0s', dMs: 780 },
-    ],
-  },
-  {
-    text: 'match deck 2 tempo to deck 1',
-    parsed: 'tempo.sync(deck:2 → deck:1)',
-    conf: 94,
-    affects: 'deck 2',
-    plan: [
-      { fn: 'tempo.read(deck:1)', detail: 'target  =  116.2 BPM', t: '—', dMs: 600 },
-      { fn: 'tempo.set(deck:2)', detail: '124.0  →  116.2  ( −6.3 % )', t: '—', dMs: 800 },
-      { fn: 'phase.align(deck:2)', detail: 'nudge to nearest downbeat', t: '~1s', dMs: 700 },
-    ],
-  },
-  {
-    text: 'kill the bass on deck 1',
-    parsed: 'eq.low(deck:1) = -inf',
-    conf: 99,
-    affects: 'deck 1',
-    plan: [{ fn: 'eq.low(deck:1)', detail: 'set  0.0 dB  →  −∞', t: '—', dMs: 1100 }],
-  },
-  {
-    text: 'loop deck 1 for 8 beats',
-    parsed: 'loop(deck:1, beats:8)',
-    conf: 98,
-    affects: 'deck 1',
-    plan: [
-      { fn: 'loop.set(deck:1)', detail: 'length  8 beats  @ next bar', t: '—', dMs: 850 },
-      { fn: 'loop.enable(deck:1)', detail: 'engage on downbeat', t: '—', dMs: 850 },
-    ],
-  },
-];
-
-export interface PilotFlowState {
+export interface PilotFlowApi {
   phase: Phase;
-  typed: number;
-  revealed: number;
+  text: string;
+  setText: (text: string) => void;
+  parseResult: ParseResponse | null;
   executed: number;
-  elapsed: number;
-  example: PilotExample;
-  exampleIdx: number;
+  history: HistoryEntry[];
+  error: string | null;
+  suggestion: SuggestionPayload | null;
+  /** True when the most recent regex parse returned no_regex_match.
+   *  UI uses this to show the "press ⏎ to ask Haiku" hint. */
+  regexMissed: boolean;
+  /** Triggered by Enter or the Run button.
+   *  - If a plan is ready → run it.
+   *  - If no plan + text has content → fire LLM parse. */
+  onSubmit: () => void;
+  onUndoEntry: (idx: number) => void;
+  onReset: () => void;
 }
 
-export function usePilotFlow(): PilotFlowState {
-  const [exampleIdx, setExampleIdx] = useState(0);
+export function usePilotFlow(): PilotFlowApi {
+  const [text, setText_] = useState('');
   const [phase, setPhase] = useState<Phase>('typing');
-  const [typed, setTyped] = useState(0);
-  const [revealed, setRevealed] = useState(0);
+  const [parseResult, setParseResult] = useState<ParseResponse | null>(null);
   const [executed, setExecuted] = useState(-1);
-  const startedAt = useRef(0);
-  const [elapsed, setElapsed] = useState(0);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [suggestion, setSuggestion] = useState<SuggestionPayload | null>(null);
+  const [regexMissed, setRegexMissed] = useState(false);
 
-  const example = PILOT_EXAMPLES[exampleIdx];
-  const totalSteps = example.plan.length;
+  const parseAbortRef = useRef<AbortController | null>(null);
+  const executeAbortRef = useRef<AbortController | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stepTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Typing: char-by-char with slight jitter so it feels natural, not robotic.
-  useEffect(() => {
-    if (phase !== 'typing') return;
-    if (typed < example.text.length) {
-      const t = setTimeout(() => setTyped((c) => c + 1), 38 + Math.random() * 28);
-      return () => clearTimeout(t);
+  // ── Eager regex parse ─────────────────────────────────────────────────
+
+  const setText = useCallback((next: string) => {
+    setText_(next);
+    setError(null);
+    setSuggestion(null);
+
+    // Empty input → full reset.
+    if (!next.trim()) {
+      setPhase('typing');
+      setParseResult(null);
+      setExecuted(-1);
+      setRegexMissed(false);
+      parseAbortRef.current?.abort();
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      return;
     }
-    const t = setTimeout(() => {
-      setRevealed(0);
-      setPhase('parsing');
-    }, 650);
-    return () => clearTimeout(t);
-  }, [phase, typed, example.text.length]);
 
-  // Parsing: stream plan steps in one at a time.
-  useEffect(() => {
-    if (phase !== 'parsing') return;
-    if (revealed < totalSteps) {
-      const t = setTimeout(() => setRevealed((r) => r + 1), 320);
-      return () => clearTimeout(t);
+    // Abort any in-flight regex parse + restart the debounce.
+    parseAbortRef.current?.abort();
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+
+    // Stay in 'typing' until regex confirms a match.
+    setPhase('typing');
+
+    debounceRef.current = setTimeout(() => {
+      void runRegexParse(next);
+    }, REGEX_DEBOUNCE_MS);
+  }, []);
+
+  const runRegexParse = async (textToParse: string) => {
+    const controller = new AbortController();
+    parseAbortRef.current = controller;
+
+    try {
+      const res = await api.parse(textToParse, 'regex', controller.signal);
+      if (controller.signal.aborted) return;
+
+      if (res.error === 'no_regex_match') {
+        // No regex pattern matched — user can press Enter to ask the LLM.
+        setParseResult(null);
+        setPhase('typing');
+        setRegexMissed(true);
+        return;
+      }
+
+      if (res.error) {
+        setError(res.error);
+        setParseResult(null);
+        setPhase('typing');
+        setRegexMissed(false);
+        return;
+      }
+
+      // Regex matched — full plan is ready.
+      setParseResult(res);
+      setPhase('ready');
+      setRegexMissed(false);
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') return;
+      setError((err as Error).message);
+      setPhase('typing');
     }
-    const t = setTimeout(() => setPhase('ready'), 260);
-    return () => clearTimeout(t);
-  }, [phase, revealed, totalSteps]);
+  };
 
-  // Ready: hold so the viewer can read the plan, then auto-run.
-  useEffect(() => {
-    if (phase !== 'ready') return;
-    const t = setTimeout(() => {
-      setExecuted(0);
-      setPhase('running');
-      startedAt.current = performance.now();
-    }, 2100);
-    return () => clearTimeout(t);
-  }, [phase]);
+  // ── LLM parse (only fired by Enter / submit) ──────────────────────────
 
-  // Running: drive elapsed on the active step; advance when its dMs elapses.
-  useEffect(() => {
-    if (phase !== 'running') return;
-    if (executed < 0 || executed >= totalSteps) return;
-    startedAt.current = performance.now();
-    setElapsed(0);
-    let raf = 0;
-    let gap: ReturnType<typeof setTimeout> | undefined;
-    const tick = () => {
-      const dt = performance.now() - startedAt.current;
-      setElapsed(dt);
-      if (dt < example.plan[executed].dMs) {
-        raf = requestAnimationFrame(tick);
-      } else {
-        gap = setTimeout(() => {
-          if (executed + 1 < totalSteps) setExecuted(executed + 1);
-          else setPhase('done');
-        }, 160);
+  const runLlmParse = async () => {
+    if (!text.trim()) return;
+    setPhase('parsing');
+    setError(null);
+    setSuggestion(null);
+    setRegexMissed(false);
+
+    const controller = new AbortController();
+    parseAbortRef.current?.abort();
+    parseAbortRef.current = controller;
+
+    try {
+      const res = await api.parse(text, 'auto', controller.signal);
+      if (controller.signal.aborted) return;
+
+      if (res.error && res.error !== 'no_regex_match') {
+        setError(res.error);
+        setPhase('typing');
+        setParseResult(null);
+        return;
+      }
+
+      if (res.suggestion) {
+        setSuggestion(res.suggestion);
+        setParseResult(res);
+        setPhase('ready');
+        return;
+      }
+
+      setParseResult(res);
+      setPhase('ready');
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') return;
+      setError((err as Error).message);
+      setPhase('typing');
+    }
+  };
+
+  // ── Execute ──────────────────────────────────────────────────────────
+
+  const clearStepTimer = () => {
+    if (stepTimerRef.current) {
+      clearTimeout(stepTimerRef.current);
+      stepTimerRef.current = null;
+    }
+  };
+
+  const runPlan = (toRun: ParseResponse) => {
+    if (toRun.plan.length === 0) return;
+
+    setExecuted(0);
+    setPhase('running');
+    setError(null);
+
+    let i = 0;
+    const advance = () => {
+      i += 1;
+      if (i < toRun.plan.length) {
+        setExecuted(i);
+        stepTimerRef.current = setTimeout(advance, toRun.plan[i].dMs);
       }
     };
-    raf = requestAnimationFrame(tick);
-    return () => {
-      if (raf) cancelAnimationFrame(raf);
-      if (gap) clearTimeout(gap);
-    };
-  }, [phase, executed, totalSteps, example.plan]);
+    stepTimerRef.current = setTimeout(advance, toRun.plan[0].dMs);
 
-  // Done: hold, then cycle to the next example.
+    const controller = new AbortController();
+    executeAbortRef.current = controller;
+
+    void api
+      .execute(toRun.plan, controller.signal)
+      .then((res) => {
+        if (controller.signal.aborted) return;
+        clearStepTimer();
+
+        if (!res.success) {
+          setError(res.error ?? 'Execute failed.');
+          setPhase('ready');
+          return;
+        }
+
+        if (res.suggestion) {
+          setSuggestion(res.suggestion);
+          setPhase('ready');
+          return;
+        }
+
+        setExecuted(toRun.plan.length);
+        setPhase('done');
+
+        setHistory((h) => [
+          {
+            when: 'just now',
+            prompt: toRun.text,
+            parsed: toRun.parsed,
+            summary: `Ran ${toRun.plan.length}-step plan via ${toRun.source}.`,
+            isNew: true,
+          },
+          ...h.slice(0, 9),
+        ]);
+      })
+      .catch((err) => {
+        if ((err as Error).name === 'AbortError') return;
+        clearStepTimer();
+        setError((err as Error).message);
+        setPhase('ready');
+      });
+  };
+
+  // ── onSubmit (Enter / Run button) ─────────────────────────────────────
+
+  const onSubmit = useCallback(() => {
+    if (phase === 'running' || phase === 'parsing') return;
+    if (suggestion) return; // can't run suggestions
+
+    if (parseResult && parseResult.plan.length > 0) {
+      runPlan(parseResult);
+      return;
+    }
+
+    // No plan yet — user wants the LLM to take a swing.
+    if (text.trim()) {
+      void runLlmParse();
+    }
+  }, [phase, parseResult, suggestion, text]);
+
+  // ── Reset Mixxx ──────────────────────────────────────────────────────
+
+  const onReset = useCallback(() => {
+    void api.reset().then((res) => {
+      if (!res.success) setError(res.error ?? 'Reset failed.');
+      else {
+        setHistory((h) => [
+          {
+            when: 'just now',
+            prompt: 'reset mixxx',
+            parsed: 'system.reset()',
+            summary: 'All decks paused, crossfader centred, EQs neutral.',
+            isNew: true,
+          },
+          ...h.slice(0, 9),
+        ]);
+      }
+    });
+  }, []);
+
+  // ── Undo a history entry ─────────────────────────────────────────────
+
+  const onUndoEntry = useCallback((idx: number) => {
+    setHistory((h) => h.map((entry, i) => (i === idx ? { ...entry, isNew: false } : entry)));
+  }, []);
+
+  // ── Cleanup ──────────────────────────────────────────────────────────
+
   useEffect(() => {
-    if (phase !== 'done') return;
-    const t = setTimeout(() => {
-      setExampleIdx((i) => (i + 1) % PILOT_EXAMPLES.length);
-      setTyped(0);
-      setRevealed(0);
-      setExecuted(-1);
-      setElapsed(0);
-      setPhase('typing');
-    }, 2600);
-    return () => clearTimeout(t);
-  }, [phase]);
+    return () => {
+      parseAbortRef.current?.abort();
+      executeAbortRef.current?.abort();
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      clearStepTimer();
+    };
+  }, []);
 
-  return { phase, typed, revealed, executed, elapsed, example, exampleIdx };
+  return {
+    phase,
+    text,
+    setText,
+    parseResult,
+    executed,
+    history,
+    error,
+    suggestion,
+    regexMissed,
+    onSubmit,
+    onUndoEntry,
+    onReset,
+  };
 }

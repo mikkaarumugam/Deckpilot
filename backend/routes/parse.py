@@ -94,9 +94,22 @@ async def parse(req: ParseRequest) -> ParseResponse:
     deck_state = feedback.snapshot() if feedback is not None else None
 
     # Try regex first (fast-path, in-process, no LLM call).
-    regex_result = regex_parse(req.text)
-    if regex_result is not None:
-        return _build_response(req.text, regex_result, source="regex", library=library)
+    if req.mode in ("auto", "regex"):
+        regex_result = regex_parse(req.text)
+        if regex_result is not None:
+            return _build_response(req.text, regex_result, source="regex", library=library)
+        if req.mode == "regex":
+            # Sentinel — UI uses this to show the "press Enter to ask Haiku"
+            # hint instead of an error toast. Not a real failure.
+            return ParseResponse(
+                text=req.text,
+                parsed="",
+                conf=0,
+                affects="",
+                source="regex",
+                plan=[],
+                error="no_regex_match",
+            )
 
     # Fall through to the LLM. Wrap the blocking subprocess call so
     # FastAPI's event loop stays responsive.
