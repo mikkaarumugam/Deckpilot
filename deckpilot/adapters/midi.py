@@ -34,6 +34,7 @@ from deckpilot.core.actions import (
 )
 
 if TYPE_CHECKING:
+    from deckpilot.adapters.gui import MixxxGuiAdapter
     from deckpilot.library import LibraryReader, Track
 
 
@@ -114,15 +115,23 @@ DEFAULT_PORT_NAME = "IAC Driver Bus 1"
 class MidiAdapter(Adapter):
     """Dispatches atomic DJActions as MIDI messages.
 
-    `library` is optional: only needed to dispatch LoadTrack actions
-    (we look up the file path from the library DB). The adapter still
-    works without it — LoadTrack just raises a helpful error.
+    `library` is optional: needed to (a) resolve LoadTrack ids to
+    Track records and (b) run the uniqueness check before delegating
+    to the GUI adapter. Without it, LoadTrack falls back to the
+    suggestion-card path.
+
+    `gui` is also optional: when present AND the library uniqueness
+    check passes, LoadTrack actions execute via the GUI adapter
+    (Mixxx search-box automation, see D-019). When absent, LoadTrack
+    falls back to LoadTrackSuggestion so the dashboard can render a
+    "drag this manually" card (the D-015 behavior).
     """
 
     def __init__(
         self,
         port_name: str = DEFAULT_PORT_NAME,
         library: "LibraryReader | None" = None,
+        gui: "MixxxGuiAdapter | None" = None,
     ) -> None:
         self._midi_out = rtmidi.MidiOut()
         ports = self._midi_out.get_ports()
@@ -137,6 +146,7 @@ class MidiAdapter(Adapter):
         self._midi_out.open_port(port_index)
         self._port_name = ports[port_index]
         self._library = library
+        self._gui = gui
 
     @property
     def port_name(self) -> str:
@@ -189,30 +199,46 @@ class MidiAdapter(Adapter):
                 "Use Executor.run_plan() for composite actions like FadeToDeck."
             )
 
-    # --- LoadTrack dispatch (non-MIDI, see D-015) ---
+    # --- LoadTrack dispatch (hybrid MIDI + GUI, see D-019) ---
 
     def _dispatch_load_track(self, action: LoadTrack) -> None:
-        """LoadTrack is intentionally not auto-dispatched.
+        """LoadTrack is the one action MIDI can't reach — Mixxx's
+        controller-script API has no path-based load primitive across
+        versions 2.5-2.7 (see D-015). D-019 supersedes D-015: we now
+        load via a GUI adapter (macOS osascript driving Mixxx's library
+        search box) when one is wired in AND the chosen track is
+        uniquely identifiable from its title+artist. Otherwise we fall
+        back to LoadTrackSuggestion so the dashboard renders a
+        manual-drag card (the original D-015 behaviour).
 
-        We investigated three load paths and rejected them all (see
-        DECISIONS § D-015):
-          - `open -a Mixxx <file>`: Mixxx 2.5/2.6 ignore open events
-            for already-running instances.
-          - Mixxx 2.6 controller API: still no path-based load — only
-            UI-selected load.
-          - Library navigation via MIDI: works but is fragile to any
-            user click in Mixxx's library pane.
-
-        Instead the dashboard intercepts plans containing LoadTrack and
-        renders a 'Suggested track' card (the LLM's library reasoning
-        IS the deliverable). The exception below carries the resolved
-        Track so the dashboard can build the card without re-querying
-        the library.
+        The uniqueness check is a guard against destructive misfires:
+        if the LLM picks a track whose title+artist matches multiple
+        rows in the library, GUI search would filter to >1 row and
+        Shift+Right would load the wrong one. Conservative fallback
+        > silent error.
         """
         if self._library is None:
+            # No library → can't resolve track or build search query.
             raise LoadTrackSuggestion(action=action, track=None)
+
         track = self._library.get_by_id(action.track_id)
-        raise LoadTrackSuggestion(action=action, track=track)
+        if track is None:
+            raise LoadTrackSuggestion(action=action, track=None)
+
+        if self._gui is None:
+            # No GUI adapter wired → fall back to the suggestion card.
+            raise LoadTrackSuggestion(action=action, track=track)
+
+        query = f"{track.title} {track.artist}".strip()
+        if self._library.count_search_matches(query) != 1:
+            # Ambiguous — multiple library rows match this query; GUI
+            # search would risk loading the wrong row. Defer to user.
+            raise LoadTrackSuggestion(action=action, track=track)
+
+        # Fire the GUI load. Blocks until Mixxx has loaded the track
+        # so any subsequent step in the plan (e.g. PlayDeck) fires at
+        # the right moment without manual scheduling.
+        self._gui.load_track(deck=action.deck, query=query)
 
     # --- low-level MIDI helpers ---
 

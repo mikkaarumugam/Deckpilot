@@ -34,7 +34,7 @@ from ..models import (
     TrackPayload,
 )
 from ..services.signatures import affects_label, render_action, summary_signature
-from ..services.singletons import get_feedback, get_library
+from ..services.singletons import get_feedback, get_gui_adapter, get_library
 
 router = APIRouter()
 
@@ -128,9 +128,12 @@ async def parse(req: ParseRequest) -> ParseResponse:
             error=str(exc),
         )
 
-    # Special case: LLM picked a LoadTrack — surface as a suggestion card.
-    # The single LoadTrack step doesn't run; subsequent steps would target
-    # an unloaded deck so we drop the whole plan and return the suggestion.
+    # Special case: LLM picked a LoadTrack — surface a suggestion card
+    # alongside the plan. Pre-D-019 we dropped the whole plan and forced
+    # the user to drag. Now we keep the plan: if the GUI adapter is
+    # wired AND the title+artist is unique in the library, /execute can
+    # auto-fire the load. The UI uses `suggestion.auto_loadable` to
+    # decide between the countdown UX and the manual-drag fallback.
     load_step = next(
         (s for s in plan.steps if isinstance(s.action, LoadTrack)),
         None,
@@ -139,26 +142,28 @@ async def parse(req: ParseRequest) -> ParseResponse:
         load = load_step.action
         track = library.get_by_id(load.track_id)
         if track is not None:
-            return ParseResponse(
-                text=req.text,
-                parsed=f"library.suggest(deck:{load.deck}, id:{load.track_id})",
-                conf=95,
-                affects=f"deck {load.deck}",
-                source="llm",
-                plan=[],  # nothing to execute
-                suggestion=SuggestionPayload(
-                    track=TrackPayload(
-                        id=track.id,
-                        artist=track.artist,
-                        title=track.title,
-                        bpm=track.bpm,
-                        key=track.key,
-                        genre=track.genre,
-                    ),
-                    deck=load.deck,
-                    reasoning=load.reasoning,
-                ),
+            query = f"{track.title} {track.artist}".strip()
+            # Mirror the same uniqueness guard MidiAdapter applies, so
+            # the UI knows upfront whether the auto-load will succeed.
+            auto_loadable = (
+                get_gui_adapter() is not None
+                and library.count_search_matches(query) == 1
             )
+            response = _build_response(req.text, plan, source="llm", library=library)
+            response.suggestion = SuggestionPayload(
+                track=TrackPayload(
+                    id=track.id,
+                    artist=track.artist,
+                    title=track.title,
+                    bpm=track.bpm,
+                    key=track.key,
+                    genre=track.genre,
+                ),
+                deck=load.deck,
+                reasoning=load.reasoning,
+                auto_loadable=auto_loadable,
+            )
+            return response
 
     return _build_response(req.text, plan, source="llm", library=library)
 

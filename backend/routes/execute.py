@@ -4,10 +4,11 @@ Reconstructs `DJAction` instances from the dict payloads via the
 existing `_payload_to_action` helper, wraps them in `TimedAction`s,
 runs the resulting `ActionPlan` through the existing Executor.
 
-If the plan contains a LoadTrack the adapter raises
-`LoadTrackSuggestion` (see D-015). We catch it and return a 200 with
-the suggestion payload — the frontend renders the suggestion card
-instead of an error state.
+If a LoadTrack in the plan can't auto-load (no GUI adapter, library
+unavailable, or the title+artist is ambiguous), the adapter raises
+`LoadTrackSuggestion` (see D-015 / D-019). We catch it and return a
+200 with the suggestion payload + `auto_loadable: false` — the
+frontend then falls back to the manual-drag suggestion card.
 """
 
 from __future__ import annotations
@@ -64,6 +65,10 @@ async def execute(req: ExecuteRequest) -> ExecuteResponse:
         # multiple seconds; we don't want to block the event loop.
         await asyncio.to_thread(executor.run_plan, plan)
     except LoadTrackSuggestion as sug:
+        # Reaching this branch means the adapter declined auto-load
+        # (no GUI adapter, no library, or library uniqueness failed).
+        # Surface a suggestion with auto_loadable=False so the UI shows
+        # the manual-drag fallback instead of looping the countdown.
         elapsed_ms = int((time.monotonic() - start) * 1000)
         track = sug.track
         payload = None
@@ -79,6 +84,7 @@ async def execute(req: ExecuteRequest) -> ExecuteResponse:
                 ),
                 deck=sug.action.deck,
                 reasoning=sug.action.reasoning,
+                auto_loadable=False,
             )
         return ExecuteResponse(
             success=True,

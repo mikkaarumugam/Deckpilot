@@ -89,15 +89,24 @@ class PlanStepPayload(BaseModel):
 
 
 class SuggestionPayload(BaseModel):
-    """Returned in place of a runnable plan when the LLM emits LoadTrack.
+    """Returned alongside a plan that contains a LoadTrack action.
 
-    Mixxx 2.5/2.6 have no path-based load API (D-015), so LoadTrack is
-    surfaced as a user-confirmed suggestion rather than executed.
+    Carries the chosen track + LLM reasoning for the UI to render as a
+    preview card. `auto_loadable` indicates whether the backend can
+    actually execute the load via the GUI adapter (D-019) — true means
+    the UI shows a countdown + auto-fires /execute; false means it
+    falls back to the manual-drag hint (the original D-015 behaviour).
     """
 
     track: TrackPayload
     deck: int
     reasoning: str
+    # True when the GUI adapter is wired AND the library uniqueness
+    # check passes (title+artist match exactly one library row). False
+    # otherwise — UI then shows the "drag manually" hint and the plan
+    # won't auto-fire. See deckpilot/adapters/midi.py:_dispatch_load_track
+    # for the equivalent server-side guard.
+    auto_loadable: bool = False
 
 
 class ParseResponse(BaseModel):

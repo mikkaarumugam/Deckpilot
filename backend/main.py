@@ -26,6 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .routes import execute as execute_routes
 from .routes import parse as parse_routes
+from .routes import parse_stream as parse_stream_routes
 from .routes import reset as reset_routes
 from .routes import state as state_routes
 from .routes import undo as undo_routes
@@ -65,6 +66,7 @@ app.add_middleware(
 )
 
 app.include_router(parse_routes.router)
+app.include_router(parse_stream_routes.router)
 app.include_router(execute_routes.router)
 app.include_router(state_routes.router)
 app.include_router(undo_routes.router)
@@ -76,5 +78,12 @@ def root():
     return {
         "name": "DeckPilot",
         "version": "0.2.0",
-        "endpoints": ["/parse", "/execute", "/state", "/undo", "/reset"],
+        "endpoints": [
+            "/parse",
+            "/parse/stream",
+            "/execute",
+            "/state",
+            "/undo",
+            "/reset",
+        ],
     }

@@ -144,3 +144,40 @@ class LibraryReader:
         / deleted. Used by future LoadTrack dispatch."""
         results = self._query("library.id = ?", (track_id,))
         return results[0] if results else None
+
+    def count_search_matches(self, query: str) -> int:
+        """Approximate how many rows Mixxx's library search would show
+        for `query`. Used by the GUI auto-load path (D-019) as a
+        uniqueness check before firing GUI automation — if more than
+        one row matches, we fall back to the manual-drag suggestion
+        card rather than risk loading the wrong track.
+
+        Conservative approximation: each space-separated token must
+        appear (case-insensitive substring) in either the title or
+        the artist. Mixxx's actual search also covers album / comment
+        / genre, so a `1` here doesn't *guarantee* Mixxx will show
+        exactly 1 row — but in practice it's accurate enough for
+        typical "Title Artist" queries.
+        """
+        tokens = [t.lower() for t in query.split() if t]
+        if not tokens:
+            return 0
+
+        conditions = []
+        params: list[str] = []
+        for t in tokens:
+            conditions.append(
+                "(LOWER(library.title) LIKE ? OR LOWER(library.artist) LIKE ?)"
+            )
+            params.extend([f"%{t}%", f"%{t}%"])
+
+        where = " AND ".join(conditions)
+        sql = f"""
+            SELECT COUNT(*) FROM library
+            JOIN track_locations ON library.location = track_locations.id
+            WHERE library.mixxx_deleted = 0
+              AND track_locations.fs_deleted = 0
+              AND {where}
+        """
+        with self._connect() as conn:
+            return conn.execute(sql, tuple(params)).fetchone()[0]

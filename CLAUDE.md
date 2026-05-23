@@ -68,8 +68,11 @@ deckpilot/
 │       └── errors.py       ← shared ParseError
 ├── adapters/
 │   ├── base.py             ← Adapter interface
-│   ├── midi.py             ← MidiAdapter (python-rtmidi → IAC Driver)
+│   ├── midi.py             ← MidiAdapter (python-rtmidi → IAC Driver).
+│   │                         Hybrid LoadTrack dispatch: GUI when unique,
+│   │                         LoadTrackSuggestion fallback otherwise (D-019).
 │   ├── midi_feedback.py    ← MixxxFeedback (Mixxx → Python state read-back)
+│   ├── gui.py              ← MixxxGuiAdapter (osascript GUI driver; D-019)
 │   └── mappings/
 │       ├── mixxx.midi.xml  ← Mixxx-side bindings + outputs (note/CC ↔ control)
 │       └── mixxx.midi.js   ← JS handlers: play/pause + scripted BPM output
@@ -82,8 +85,9 @@ backend/                    ← FastAPI HTTP wrapper (shipped D-018)
   main.py                   ← app + CORS + lifespan + routes
   models.py                 ← Pydantic wire-format schemas
   services/
-    singletons.py           ← lazy LibraryReader / MidiAdapter / Executor /
-                              MixxxFeedback (all fail-soft)
+    singletons.py           ← lazy LibraryReader / MidiAdapter /
+                              MixxxGuiAdapter / Executor / MixxxFeedback
+                              (all fail-soft)
     signatures.py           ← DJAction → (fn, detail, t, dMs) display strings
   routes/
     parse.py                ← POST /parse (mode: auto|regex|llm)

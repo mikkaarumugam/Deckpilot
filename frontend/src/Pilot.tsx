@@ -137,6 +137,9 @@ export function Pilot() {
           error={flow.error}
           suggestion={flow.suggestion}
           regexMissed={flow.regexMissed}
+          autoLoadPending={flow.autoLoadPending}
+          autoLoadCountdownMs={flow.autoLoadCountdownMs}
+          onCancelAutoLoad={flow.onCancelAutoLoad}
           onSubmit={flow.onSubmit}
         />
 

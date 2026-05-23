@@ -130,6 +130,39 @@ SetCrossfader events at 30 fps, each with its own `at_seconds` offset.
 A SetEQ scheduled at `at_seconds=2` lands cleanly in the middle of the
 expanded fade stream — no threading, no coordination.
 
+## Hybrid adapters: MIDI for control, GUI for the one gap
+
+The adapter pattern is split across two implementations because
+Mixxx's controller-script API doesn't cover every action we need.
+`MidiAdapter` ships ~10 atomic actions over the IAC Driver; the one
+exception is `LoadTrack`, which has no path-based primitive in the
+Mixxx 2.5-2.7 controller API. For that one operation, `MixxxGuiAdapter`
+drives Mixxx's GUI via macOS `osascript` (search-box paste → highlight
+top result → Mixxx's load shortcut). See DECISIONS § D-019 for the
+journey from D-015's manual-drag suggestion to today's hybrid.
+
+Routing happens in one place: `MidiAdapter._dispatch_load_track`. If a
+GUI adapter is wired AND `LibraryReader.count_search_matches(query) ==
+1`, it delegates to GUI. Otherwise it raises `LoadTrackSuggestion` so
+the UI can render the original manual-drag card as a graceful fallback.
+
+```
+DJAction
+  │
+  ├─ PlayDeck, PauseDeck, SetEQ, SetCrossfader, …    ─▶  MidiAdapter ─▶ IAC ─▶ Mixxx
+  │
+  └─ LoadTrack ─▶ MidiAdapter._dispatch_load_track
+                    │
+                    ├─ library unique?  ─▶  MixxxGuiAdapter ─▶ osascript ─▶ Mixxx
+                    │
+                    └─ ambiguous / no GUI ─▶  LoadTrackSuggestion (UI fallback)
+```
+
+This is *bounded GUI automation* — GUI code lives in one function,
+called from one place, with an explicit uniqueness guard. A future
+Mixxx release that adds a real load API would swap out only the GUI
+adapter. The same shape would work for Traktor / Serato.
+
 ## MIDI side
 
 `MidiAdapter.dispatch(action)` translates one atomic action to one or

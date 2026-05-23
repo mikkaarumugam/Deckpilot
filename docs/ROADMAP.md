@@ -3,7 +3,7 @@
 Single source of truth for project status. Updated by humans (or future
 Claude) when state changes.
 
-Last updated: **2026-05-22**
+Last updated: **2026-05-23**
 
 ## ✅ Shipped
 
@@ -32,6 +32,8 @@ Last updated: **2026-05-22**
 | **React-3** | **FastAPI backend wrapping deckpilot/ over HTTP** | `52deaa8` |
 | **React-4** | **React UI wired to FastAPI (Pattern C: regex eager, LLM on Enter)** | `7de4994` |
 | **React-5** | **Clear stale state on text edit + suggestion font polish** | `088092d` |
+| **GUI-1** | **MixxxGuiAdapter + auto-load via osascript (D-019 supersedes D-015)** | *(pending)* |
+| **Stream-1** | **SSE streaming for LLM parses — plan steps reveal as Haiku generates (D-020)** | *(pending)* |
 
 Functionally end-to-end working: type or speak (via WhisperType) →
 parsed via regex or Haiku → library-aware multi-step plan visible in
@@ -94,7 +96,7 @@ in DECISIONS as P2.
 
 | Idea | Why deferred |
 |---|---|
-| **Auto-load tracks onto a Mixxx deck** | Verified against Mixxx 2.5 + 2.6 + 2.7-alpha: no controller-script or HTTP API for path-based load (only UI-selected). `open -a Mixxx <file>` is ignored by an already-running instance. See D-015 — we ship LoadTrack as a SUGGESTION instead. Drop-in upgrade if a future Mixxx exposes the API. |
+| ~~Auto-load tracks onto a Mixxx deck~~ | **No longer deferred** — D-019 (2026-05-23) ships a `MixxxGuiAdapter` that drives Mixxx's library search box via `osascript`, then fires Mixxx's load shortcut. Manual-drag suggestion (D-015) is now the *fallback* for ambiguous matches, not the default. |
 | **Mixxx stems** | Stems require Mixxx 2.6+. User has 2.5.6 stable. EQ-based bass swap (D-010) covers the demo. Drop-in upgrade when 2.6 stable lands. |
 | **Bundled voice input (Whisper)** | User uses WhisperType locally; dictates into any focused input. No need to ship it. |
 | **MCP server** | Nice future option but not portfolio-critical. Mentioned in README "what's next". |

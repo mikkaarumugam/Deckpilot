@@ -34,6 +34,14 @@ interface CommandCardProps {
   /** True when the regex parser found no match. UI uses this to render
    *  a "Press ⏎ to ask Haiku" hint instead of an empty plan area. */
   regexMissed: boolean;
+  /** True while the GUI auto-load countdown is in flight. Drives the
+   *  Cancel button + animated progress bar on the suggestion card.
+   *  See D-019. */
+  autoLoadPending: boolean;
+  /** Countdown duration in ms — used to size the CSS animation. */
+  autoLoadCountdownMs: number;
+  /** Cancels the in-flight auto-load + clears suggestion + plan. */
+  onCancelAutoLoad: () => void;
   /** Triggered by Enter on the input or click on the primary button.
    *  The hook decides whether this means "run the plan" or "ask the LLM". */
   onSubmit: () => void;
@@ -41,7 +49,11 @@ interface CommandCardProps {
 }
 
 function stepStateFor(i: number, phase: Phase, executed: number): PlanStepState {
-  if (phase === 'typing' || phase === 'parsing') return 'hidden';
+  if (phase === 'typing') return 'hidden';
+  // During parsing we WANT steps visible — they're streaming in
+  // one-by-one from /parse/stream. Render as pending until the
+  // 'complete' event flips us into 'ready'.
+  if (phase === 'parsing') return 'pending';
   if (phase === 'ready') return 'pending';
   if (phase === 'running') {
     if (i < executed) return 'done';
@@ -61,6 +73,9 @@ export function CommandCard({
   error,
   suggestion,
   regexMissed,
+  autoLoadPending,
+  autoLoadCountdownMs,
+  onCancelAutoLoad,
   onSubmit,
   onQueue,
 }: CommandCardProps) {
@@ -215,7 +230,12 @@ export function CommandCard({
 
       {/* Plan OR Suggestion */}
       {suggestion ? (
-        <SuggestionPanel suggestion={suggestion} />
+        <SuggestionPanel
+          suggestion={suggestion}
+          autoLoadPending={autoLoadPending}
+          autoLoadCountdownMs={autoLoadCountdownMs}
+          onCancelAutoLoad={onCancelAutoLoad}
+        />
       ) : (
         <PlanArea
           plan={plan}
@@ -294,10 +314,22 @@ function PlanArea({
             key={i}
             n={i + 1}
             step={step}
-            last={i === plan.length - 1}
+            last={
+              // While streaming, treat the last STREAMED step as a
+              // continuation point (we render an "incoming…" row right
+              // below it). Only mark it as last when the stream has
+              // committed and we're in ready/running/done.
+              phase === 'parsing'
+                ? false
+                : i === plan.length - 1
+            }
             state={stepStateFor(i, phase, executed)}
           />
         ))}
+        {/* Streaming indicator — shown beneath the last streamed step
+            while we're still waiting for more. Disappears the moment
+            phase flips to 'ready' (the 'complete' SSE event fired). */}
+        {phase === 'parsing' && plan.length > 0 && <StreamingTail />}
         {plan.length === 0 && (
           <div
             style={{
@@ -318,8 +350,51 @@ function PlanArea({
   );
 }
 
-function SuggestionPanel({ suggestion }: { suggestion: SuggestionPayload }) {
-  const { track, deck, reasoning } = suggestion;
+/** Row shown beneath the last streamed plan step while the SSE
+ *  stream is still open. Pulses softly to indicate "more incoming".
+ *  Mirrors PlanStep's visual layout (rail + node + label) so it
+ *  feels like a placeholder for the next step. */
+function StreamingTail() {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 14,
+        paddingLeft: 22,
+        marginTop: 4,
+        font: '400 11.5px/1.4 var(--p-mono)',
+        color: 'var(--p-muted)',
+      }}
+    >
+      <span
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: 99,
+          background: 'var(--p-accent)',
+          animation: 'pilotPulse 1.2s ease-in-out infinite',
+        }}
+      />
+      <span>streaming next step…</span>
+    </div>
+  );
+}
+
+function SuggestionPanel({
+  suggestion,
+  autoLoadPending,
+  autoLoadCountdownMs,
+  onCancelAutoLoad,
+}: {
+  suggestion: SuggestionPayload;
+  autoLoadPending: boolean;
+  autoLoadCountdownMs: number;
+  onCancelAutoLoad: () => void;
+}) {
+  const { track, deck, reasoning, auto_loadable } = suggestion;
+  const showCountdown = auto_loadable && autoLoadPending;
+  const countdownSeconds = (autoLoadCountdownMs / 1000).toFixed(1);
   return (
     <div
       style={{
@@ -340,7 +415,7 @@ function SuggestionPanel({ suggestion }: { suggestion: SuggestionPayload }) {
           marginBottom: 14,
         }}
       >
-        <span>💡 AI suggests for deck {deck}</span>
+        <span>{showCountdown ? '↻ Loading' : '💡 AI suggests'} for deck {deck}</span>
       </div>
       <div
         style={{
@@ -384,15 +459,78 @@ function SuggestionPanel({ suggestion }: { suggestion: SuggestionPayload }) {
           {reasoning}
         </div>
       )}
-      <div
-        style={{
-          marginTop: 12,
-          font: '400 12.5px/1.5 var(--p-mono)',
-          color: 'var(--p-muted)',
-        }}
-      >
-        Mixxx has no path-based load API — drag this onto deck {deck} in Mixxx manually.
-      </div>
+
+      {showCountdown ? (
+        // Auto-load mode (D-019): countdown bar + Cancel button. Bar
+        // fills over autoLoadCountdownMs via inline CSS animation —
+        // simpler than a state-driven tick and re-renders only once.
+        <div
+          style={{
+            marginTop: 14,
+            padding: '12px 14px',
+            background: 'var(--p-accent-dim)',
+            border: '1px solid var(--p-accent-edge)',
+            borderRadius: 8,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 14,
+          }}
+        >
+          <div style={{ flex: 1 }}>
+            <div
+              style={{
+                font: '500 11.5px/1.3 var(--p-mono)',
+                color: 'var(--p-fg)',
+                marginBottom: 8,
+              }}
+            >
+              Auto-loading onto deck {deck} in {countdownSeconds}s — DeckPilot is flying Mixxx
+            </div>
+            <div
+              style={{
+                width: '100%',
+                height: 3,
+                background: 'var(--p-border)',
+                borderRadius: 99,
+                overflow: 'hidden',
+              }}
+            >
+              <div
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  background: 'var(--p-accent)',
+                  transformOrigin: 'left center',
+                  animation: `pilotCountdown ${autoLoadCountdownMs}ms linear forwards`,
+                }}
+              />
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onCancelAutoLoad}
+            className="pilot-btn-secondary"
+            style={{ flexShrink: 0 }}
+          >
+            Cancel
+          </button>
+        </div>
+      ) : (
+        // Fallback: backend reported the load is ambiguous (multiple
+        // library rows match the title+artist) or the GUI adapter
+        // isn't wired. User does the load manually. See D-015.
+        <div
+          style={{
+            marginTop: 12,
+            font: '400 12.5px/1.5 var(--p-mono)',
+            color: 'var(--p-muted)',
+          }}
+        >
+          {auto_loadable
+            ? `Drag this onto deck ${deck} in Mixxx when ready.`
+            : `Title + artist matches multiple tracks — drag this onto deck ${deck} manually.`}
+        </div>
+      )}
     </div>
   );
 }

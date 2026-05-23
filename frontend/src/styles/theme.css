@@ -93,6 +93,10 @@ body {
   0%, 100% { box-shadow: 0 0 0 0 var(--p-accent-edge); }
   50% { box-shadow: 0 0 0 4px var(--p-accent-edge); }
 }
+@keyframes pilotCountdown {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
 
 /* Reusable interactive primitives. Names match the original design's classes
    so the upcoming component port can use className= directly. */

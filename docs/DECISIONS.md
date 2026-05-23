@@ -5,6 +5,166 @@ matters more than the *what* (the code is the what). Newest first.
 
 ---
 
+## D-020 · Stream LLM parses via Server-Sent Events, no API key swap
+**Date:** 2026-05-23 · **Commit:** *(pending)* · **Status: Shipped**
+
+**Context.** Post-D-019, LLM parses still felt slow to use: ~2-7s of
+static spinner between Enter and the plan appearing. Profiling on the
+user's machine pinned the dominant cost to (a) Haiku's reasoning over
+the ~1700-token static system prompt and (b) the `claude -p`
+subprocess spawn (~500ms fixed). Library context was *not* the
+bottleneck — only ~200 tokens for an 8-track library.
+
+The obvious fix — switch to the Anthropic SDK with prompt caching —
+violates [D-007](#d-007--claude-p-cli-subprocess-not-the-anthropic-sdk):
+the project deliberately routes LLM calls through the user's existing
+Claude Pro subscription to avoid metered API cost. The constraint stuck.
+
+**Decision.** Stream the LLM response with **Server-Sent Events** over
+HTTP. The frontend gets each plan step *as Haiku generates it* instead
+of waiting for the full response. Wall-clock time is essentially
+unchanged; **perceived** latency drops dramatically — first visible
+motion in ~500ms instead of ~4s.
+
+Pieces of the implementation:
+
+1. `claude -p --output-format=stream-json --include-partial-messages
+   --verbose` emits one JSON object per line as Haiku generates output.
+2. New `deckpilot/core/parser/llm_stream.py` async-iterates the
+   subprocess's stdout, filters to `content_block_delta` events of
+   type `text_delta` (ignores `thinking_delta` — Haiku's chain-of-
+   thought, not the structured output).
+3. A **tolerant brace-counting parser** (`_StepExtractor`) feeds the
+   text deltas and emits each completed plan-step JSON object as soon
+   as its closing brace arrives. Not a full JSON parser — just enough
+   to detect step boundaries inside the `"plan": [...]` array. Handles
+   strings + escapes correctly.
+4. New `POST /parse/stream` (FastAPI `StreamingResponse`) wraps each
+   step + the final complete `ParseResponse` as SSE events: `started`,
+   `step`, `complete`, `error`.
+5. Frontend `api.parseStream(text)` is an async generator using
+   `fetch` + `ReadableStream` (EventSource doesn't support POST). It
+   yields typed `ParseStreamEvent`s the hook consumes via `for await`.
+6. `usePilotFlow.runLlmParse` accumulates streamed steps into a
+   growing `parseResult.plan`; `CommandCard` renders the plan area
+   during the `parsing` phase with a "streaming next step…" indicator
+   beneath the last row.
+
+**Why SSE and not WebSocket.** SSE is one-way (server → client), which
+is exactly what we need. It's plain HTTP, plays nicely with FastAPI's
+existing CORS + lifespan setup, and degrades gracefully (browser auto-
+reconnects on transient disconnects). WebSocket would have added
+bidirectional plumbing for zero benefit.
+
+**Trade-off accepted.** A tolerant brace-counter is fragile by design
+— it makes assumptions about the LLM's output structure (objects
+inside a `plan` array, no nested arrays of objects). The system prompt
+already guarantees that shape; if it ever changes, the extractor
+silently drops steps and the final `complete` event still delivers
+the validated plan via the strict parser. So the worst case is "no
+progressive reveal, only the final plan" — not a crash.
+
+**Why this isn't violating D-007.** D-007 is about LLM *call*
+mechanics — subscription vs metered API key. D-020 changes the
+*streaming* of those calls. Independent concerns; no conflict. The
+subprocess still runs `claude -p`; the user's Claude Pro subscription
+still pays for inference.
+
+**Free side-benefit observed.** Claude Code's CLI automatically
+prompt-caches its own system context (~31k tokens, 5-minute TTL).
+This means the second LLM call within 5 minutes runs noticeably faster
+than the first — *without us doing anything special*. The streaming
+UX makes this cache warmth visible: warm calls reveal the first step
+in ~300ms, cold calls in ~1s.
+
+**Status.** Shipped 2026-05-23 alongside D-019. See `llm_stream.py`,
+`backend/routes/parse_stream.py`, `frontend/src/api/client.ts`
+(`parseStream`), `usePilotFlow.ts` (`runLlmParse`), `CommandCard.tsx`
+(`StreamingTail`).
+
+---
+
+## D-019 · GUI auto-load supersedes D-015's suggestion-only path
+**Date:** 2026-05-23 · **Commit:** *(pending)* · **Status: Shipped**
+
+**Context.** D-015 (2026-05-22) concluded that Mixxx's controller-script
+API exposes no path-based track load primitive across versions 2.5-2.7,
+so `LoadTrack` actions were rendered as a **suggestion card** — the LLM
+picks a track, the user manually drags it onto the deck. Honest UX,
+matches the Cursor/Copilot "AI suggests, human accepts destructive
+action" pattern.
+
+The framing was right but the *manual drag* was hiding a stronger story:
+DeckPilot is a **control panel that flies Mixxx**, not just a parser
+that emits structured intent. With the user dragging tracks, the agent
+loop has a hand-off where the human is the actuator. With auto-load,
+the loop closes: text → plan → Mixxx acts.
+
+**Decision.** Add a thin **GUI adapter** (`deckpilot/adapters/gui.py`)
+that drives Mixxx via macOS `osascript`:
+
+1. Copy `"{title} {artist}"` to the clipboard via `pbcopy`.
+2. AppleScript: activate Mixxx, `Cmd+F` to focus library search, `Cmd+V`
+   paste, `Return` to commit + move focus to the result list, `Down`
+   to highlight row 1.
+3. AppleScript: `Shift+Left` (deck 1) or `Shift+Right` (deck 2) — Mixxx's
+   default "load selected to deck N" shortcut.
+4. AppleScript: `Cmd+F`, `Cmd+A`, `Delete` to wipe the search and restore
+   the full library view.
+
+`MidiAdapter._dispatch_load_track` is now hybrid: if a `MixxxGuiAdapter`
+is wired AND `LibraryReader.count_search_matches(query) == 1`, it
+delegates to the GUI adapter. Otherwise it falls back to
+`LoadTrackSuggestion` (the D-015 manual-drag card). The uniqueness check
+is the safety net — without it, an ambiguous query could load the wrong
+track silently.
+
+**The architectural framing.** The adapter pattern stays clean. MIDI for
+the canonical control surface (play, pause, EQ, crossfade, sync, hot
+cues, loops); GUI for the one operation MIDI can't reach. Both adapters
+expose narrow surfaces; routing happens in one place. A future Mixxx
+release that adds a real load API would swap out *only* the GUI adapter.
+Same shape would work for Traktor / Serato.
+
+**The interview line.** *"Mixxx's controller API doesn't expose
+path-based load — I verified across versions 2.5-2.7. So I split the
+adapter: MIDI for everything the controller scripting covers, AppleScript
+GUI automation for the one operation it can't. Bounded hybrid — GUI
+automation lives in one function, called from one place, with an
+explicit uniqueness guard and a graceful fallback to manual-drag when
+the guard fails."*
+
+**Preview + countdown UX preserves D-012's plan-visible-before-audio
+principle.** When the backend marks the suggestion `auto_loadable:
+true`, the frontend renders the card with a 1.5s countdown bar and a
+**Cancel** button. The track + reasoning are visible before any audio
+fires. If the user wants a different pick, they cancel and re-issue. If
+they do nothing, /execute auto-fires and Mixxx loads the track.
+
+**Trade-offs accepted:**
+- **Focus-steal is visible.** Mixxx pops to front during the AppleScript
+  flow. We framed this as a feature ("DeckPilot is flying Mixxx") rather
+  than a bug. The interview narrative supports the framing.
+- **macOS Accessibility permission required.** First run prompts the
+  user; permanent after granting. Only blocks first-run flow.
+- **Mixxx keyboard shortcuts assumed.** Defaults verified on the user's
+  machine (`Shift+Left`/`Shift+Right` for load). A custom Mixxx keyboard
+  map would break the load step — drop-in fix would be adding a
+  `LoadSelectedTrack` MIDI binding to `mixxx.midi.xml` and dispatching
+  via MIDI from the GUI adapter (no focus steal either, as a bonus).
+- **Search-box uniqueness is approximate.** Our `count_search_matches`
+  is conservative — checks tokens against title+artist only, while Mixxx
+  also searches album/comment/genre. In practice, 1 here means 1 in
+  Mixxx too for typical "Title Artist" queries; ambiguity falls back
+  safely.
+
+**Status.** Shipped 2026-05-23. D-015 stays in the log as the *prior
+reasoning* — important because the journey (suggestion → auto-load) is
+itself the AI PM story. D-015's suggestion-card render is still the
+fallback path when the uniqueness check fails.
+
+---
+
 ## D-018 · React + FastAPI rewrite (supersedes D-014's deferral)
 **Date:** 2026-05-23 · **Branch:** `feature/react-frontend` · **Plan:** [docs/MIGRATION.md](MIGRATION.md) · **Status: Shipped**
 
@@ -154,7 +314,14 @@ since beat-aware scheduling needs current BPM + playhead position.
 ---
 
 ## D-015 · Library-aware LLM, but LoadTrack is a SUGGESTION, not auto-load
-**Date:** 2026-05-22 · **Commit:** `9854fba`
+**Date:** 2026-05-22 · **Commit:** `9854fba` · **Status: Superseded by [D-019](#d-019--gui-auto-load-supersedes-d-015s-suggestion-only-path)**
+
+> **Superseded 2026-05-23.** D-019 adds a GUI adapter (macOS `osascript`)
+> that auto-loads when the title+artist uniquely identifies a library
+> row. The manual-drag suggestion card from this ADR stays as the
+> **fallback** path for ambiguous matches. The reasoning below is
+> historical but still load-bearing for understanding why we didn't
+> just hack around the API limitation immediately.
 
 **Context.** Session 3's goal was library awareness: the LLM picks
 tracks by artist/genre/BPM/vibe and loads them onto a deck. The first

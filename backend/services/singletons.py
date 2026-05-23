@@ -22,6 +22,7 @@ from deckpilot.adapters.midi import MidiAdapter
 from deckpilot.core.executor import Executor
 
 if TYPE_CHECKING:
+    from deckpilot.adapters.gui import MixxxGuiAdapter
     from deckpilot.adapters.midi_feedback import MixxxFeedback
     from deckpilot.library import LibraryReader
 
@@ -31,6 +32,9 @@ _library_init_attempted = False
 
 _adapter: MidiAdapter | None = None
 _adapter_init_attempted = False
+
+_gui: "MixxxGuiAdapter | None" = None
+_gui_init_attempted = False
 
 _executor: Executor | None = None
 
@@ -54,15 +58,38 @@ def get_library() -> "LibraryReader | None":
     return _library
 
 
+def get_gui_adapter() -> "MixxxGuiAdapter | None":
+    """MixxxGuiAdapter drives Mixxx's GUI for the one action MIDI can't
+    handle (path-based track load). Lazy — instantiating is cheap (no
+    ports / threads), so this is mostly a consistency helper.
+
+    Returns None only if the import fails (e.g. running on non-macOS),
+    so we degrade gracefully to the manual-drag suggestion path."""
+    global _gui, _gui_init_attempted
+    if _gui is not None or _gui_init_attempted:
+        return _gui
+    _gui_init_attempted = True
+    try:
+        from deckpilot.adapters.gui import MixxxGuiAdapter
+
+        _gui = MixxxGuiAdapter()
+    except Exception:
+        _gui = None
+    return _gui
+
+
 def get_adapter() -> MidiAdapter | None:
     """MidiAdapter holds the IAC output port. Returns None if IAC is
-    unavailable (Mixxx not running, IAC Driver not enabled)."""
+    unavailable (Mixxx not running, IAC Driver not enabled).
+
+    Wires in the GUI adapter so LoadTrack actions can fire via Mixxx's
+    GUI when the chosen track is uniquely identifiable (D-019)."""
     global _adapter, _adapter_init_attempted
     if _adapter is not None or _adapter_init_attempted:
         return _adapter
     _adapter_init_attempted = True
     try:
-        _adapter = MidiAdapter(library=get_library())
+        _adapter = MidiAdapter(library=get_library(), gui=get_gui_adapter())
     except Exception:
         _adapter = None
     return _adapter

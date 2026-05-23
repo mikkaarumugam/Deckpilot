@@ -49,6 +49,10 @@ import {
 import { type HistoryEntry, type Phase } from '../types';
 
 const REGEX_DEBOUNCE_MS = 150;
+/** How long the suggestion card stays visible before the auto-load
+ *  fires. Long enough to read the reasoning + hit Cancel, short
+ *  enough not to feel sluggish. See D-019. */
+const AUTO_LOAD_COUNTDOWN_MS = 1500;
 
 export interface PilotFlowApi {
   phase: Phase;
@@ -66,6 +70,16 @@ export interface PilotFlowApi {
    *  - If a plan is ready → run it.
    *  - If no plan + text has content → fire LLM parse. */
   onSubmit: () => void;
+  /** Cancel the in-flight auto-load countdown. Clears the suggestion
+   *  + plan so the user can re-type. No-op if no countdown is active. */
+  onCancelAutoLoad: () => void;
+  /** True while an auto-load countdown is in flight (suggestion shown,
+   *  /execute will fire after AUTO_LOAD_COUNTDOWN_MS). UI uses this
+   *  to drive the countdown bar + show the Cancel button. */
+  autoLoadPending: boolean;
+  /** Countdown total in ms — exposed so the UI can size animations
+   *  without hard-coding the constant. */
+  autoLoadCountdownMs: number;
   onUndoEntry: (idx: number) => void;
   onReset: () => void;
 }
@@ -84,6 +98,16 @@ export function usePilotFlow(): PilotFlowApi {
   const executeAbortRef = useRef<AbortController | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stepTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoLoadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [autoLoadPending, setAutoLoadPending] = useState(false);
+
+  const cancelAutoLoadTimer = () => {
+    if (autoLoadTimerRef.current) {
+      clearTimeout(autoLoadTimerRef.current);
+      autoLoadTimerRef.current = null;
+    }
+    setAutoLoadPending(false);
+  };
 
   // ── Eager regex parse ─────────────────────────────────────────────────
 
@@ -91,6 +115,9 @@ export function usePilotFlow(): PilotFlowApi {
     setText_(next);
     setError(null);
     setSuggestion(null);
+    // Any keystroke cancels a pending auto-load — user is re-typing,
+    // they probably don't want the previous suggestion to fire.
+    cancelAutoLoadTimer();
 
     // Empty input → full reset.
     if (!next.trim()) {
@@ -156,7 +183,13 @@ export function usePilotFlow(): PilotFlowApi {
     }
   };
 
-  // ── LLM parse (only fired by Enter / submit) ──────────────────────────
+  // ── LLM parse via streaming (only fired by Enter / submit) ────────────
+  //
+  // Uses POST /parse/stream so plan steps populate progressively as
+  // Haiku generates them. The hook maintains a growing parseResult
+  // whose .plan array gets a new entry per `step` event. CommandCard
+  // re-renders the plan area on every change so the user sees steps
+  // pop in one-by-one.
 
   const runLlmParse = async () => {
     if (!text.trim()) return;
@@ -165,34 +198,65 @@ export function usePilotFlow(): PilotFlowApi {
     setSuggestion(null);
     setRegexMissed(false);
 
+    // Seed an empty ParseResponse so the plan area has something to
+    // grow into. The display strings stay placeholder-ish until the
+    // 'complete' event delivers the real summary.
+    setParseResult({
+      text,
+      parsed: '(streaming…)',
+      conf: 95,
+      affects: '—',
+      source: 'llm',
+      plan: [],
+      suggestion: null,
+      error: null,
+    });
+    setExecuted(-1);
+
     const controller = new AbortController();
     parseAbortRef.current?.abort();
     parseAbortRef.current = controller;
 
     try {
-      const res = await api.parse(text, 'auto', controller.signal);
-      if (controller.signal.aborted) return;
+      for await (const event of api.parseStream(text, controller.signal)) {
+        if (controller.signal.aborted) return;
 
-      if (res.error && res.error !== 'no_regex_match') {
-        setError(res.error);
-        setPhase('typing');
-        setParseResult(null);
-        return;
+        if (event.type === 'started') continue;
+
+        if (event.type === 'step') {
+          // Append the streamed step to the growing plan. React's
+          // immutable update pattern — new array, same other fields.
+          setParseResult((prev) =>
+            prev ? { ...prev, plan: [...prev.plan, event.step] } : prev,
+          );
+          continue;
+        }
+
+        if (event.type === 'complete') {
+          // Replace the partial result with the fully-formed response.
+          // The plan should be identical to what we accumulated, but
+          // the summary fields (parsed, affects, conf) now have real
+          // values + any suggestion is attached.
+          setParseResult(event.response);
+          if (event.response.suggestion) {
+            setSuggestion(event.response.suggestion);
+          }
+          setPhase('ready');
+          return;
+        }
+
+        if (event.type === 'error') {
+          setError(event.message);
+          setPhase('typing');
+          setParseResult(null);
+          return;
+        }
       }
-
-      if (res.suggestion) {
-        setSuggestion(res.suggestion);
-        setParseResult(res);
-        setPhase('ready');
-        return;
-      }
-
-      setParseResult(res);
-      setPhase('ready');
     } catch (err) {
       if ((err as Error).name === 'AbortError') return;
       setError((err as Error).message);
       setPhase('typing');
+      setParseResult(null);
     }
   };
 
@@ -265,6 +329,53 @@ export function usePilotFlow(): PilotFlowApi {
       });
   };
 
+  // ── Auto-load countdown ──────────────────────────────────────────────
+  //
+  // When a parse returns a suggestion marked auto_loadable (D-019:
+  // backend's GUI adapter is wired AND the title+artist is unique in
+  // the library), kick off a 1.5s countdown then auto-fire /execute.
+  // The card stays visible during the countdown so the user can see
+  // the AI's pick + reasoning + cancel if they want a different one.
+
+  useEffect(() => {
+    if (!suggestion?.auto_loadable) return;
+    if (!parseResult || parseResult.plan.length === 0) return;
+
+    const planToRun = parseResult;
+    setAutoLoadPending(true);
+
+    autoLoadTimerRef.current = setTimeout(() => {
+      autoLoadTimerRef.current = null;
+      setAutoLoadPending(false);
+      // Hide the preview as we hand off to the running phase — the
+      // plan timeline takes over the visual focus from here.
+      setSuggestion(null);
+      runPlan(planToRun);
+    }, AUTO_LOAD_COUNTDOWN_MS);
+
+    return () => {
+      if (autoLoadTimerRef.current) {
+        clearTimeout(autoLoadTimerRef.current);
+        autoLoadTimerRef.current = null;
+      }
+      setAutoLoadPending(false);
+    };
+    // runPlan is intentionally not in the dep array — it's recreated
+    // every render and would cause the effect to re-run constantly,
+    // racing the timeout. The closure captures the right runPlan for
+    // the render where the suggestion first arrived, which is what
+    // we want.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [suggestion, parseResult]);
+
+  const onCancelAutoLoad = useCallback(() => {
+    cancelAutoLoadTimer();
+    setSuggestion(null);
+    setParseResult(null);
+    setExecuted(-1);
+    setPhase('typing');
+  }, []);
+
   // ── onSubmit (Enter / Run button) ─────────────────────────────────────
 
   const onSubmit = useCallback(() => {
@@ -315,6 +426,7 @@ export function usePilotFlow(): PilotFlowApi {
       parseAbortRef.current?.abort();
       executeAbortRef.current?.abort();
       if (debounceRef.current) clearTimeout(debounceRef.current);
+      if (autoLoadTimerRef.current) clearTimeout(autoLoadTimerRef.current);
       clearStepTimer();
     };
   }, []);
@@ -329,7 +441,10 @@ export function usePilotFlow(): PilotFlowApi {
     error,
     suggestion,
     regexMissed,
+    autoLoadPending,
+    autoLoadCountdownMs: AUTO_LOAD_COUNTDOWN_MS,
     onSubmit,
+    onCancelAutoLoad,
     onUndoEntry,
     onReset,
   };
