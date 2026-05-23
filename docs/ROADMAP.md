@@ -3,7 +3,7 @@
 Single source of truth for project status. Updated by humans (or future
 Claude) when state changes.
 
-Last updated: **2026-05-23**
+Last updated: **2026-05-24**
 
 ## ✅ Shipped
 
@@ -36,6 +36,7 @@ Last updated: **2026-05-23**
 | **Stream-1** | **SSE streaming for LLM parses — plan steps reveal as Haiku generates (D-020)** | `fa1c2d6` |
 | **Pos-1** | **Playhead position read-back via MIDI scripted output (substrate for D-021)** | `a1a5327` |
 | **Agent-1** | **Demo-scoped Tier 2 agent layer: goal-directed schedules with triggers (D-021)** | `a1a5327` |
+| **Vocab-1** | **Action vocabulary expansion: filter, FX wet, pitch, variable loops (D-022)** | `31bbba1` |
 
 Functionally end-to-end working: type or speak (via WhisperType) →
 parsed via regex or Haiku → library-aware multi-step plan visible in
@@ -113,8 +114,12 @@ in DECISIONS as P2.
 - LLM defaults to deck 1 for unspecified deck — can be wrong if user is
   on deck 2.
 - Crossfader undo snaps to 0.5, not the precise prior value.
-- LoopDeck always uses 8 beats regardless of user's `beats` parameter
-  (only one beatloop binding in the Mixxx XML).
+- ~~LoopDeck always uses 8 beats regardless of user's `beats` parameter~~
+  — fixed in D-022. Sizes {1, 2, 4, 8, 16, 32} now bound; others raise.
+- "stop loop" regex still defaults to beats=8 even if a different size
+  is active (no state read-back in the regex layer). See D-022.
+- FX unit mix is global per unit; routing both decks to the same unit
+  shares the wet level. See D-022.
 - Nudge/HotCue/Sync have no clean undo.
 - FadeToDeck assumes the crossfader is at the opposite end before
   fading (no state read-back).

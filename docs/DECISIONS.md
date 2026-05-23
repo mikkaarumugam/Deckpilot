@@ -5,6 +5,102 @@ matters more than the *what* (the code is the what). Newest first.
 
 ---
 
+## D-022 · Action vocabulary expansion — filter, FX, pitch, variable loops
+**Date:** 2026-05-24 · **Commit:** `31bbba1` · **Status: Shipped**
+
+**Context.** Through D-021 the action vocabulary was: play, pause, EQ
+(3 bands), volume, crossfader, fade, sync, nudge, hot cue, load, and an
+8-beat-only loop. Enough for the canonical demo (bass swap into deck 2)
+but missing the everyday "filter sweep", "throw FX1 on it", "pitch
+nudge", "halve the loop" moves that show off a parser. v0.3 closes the
+gap.
+
+**Decision.** Add three atomic actions (`SetFilter`, `SetFx`,
+`SetPitch`) and parameterize `LoopDeck` to actually use its `beats`
+arg. All four pieces follow the same adapter pattern (D-002): action →
+MIDI message → Mixxx mapping → JS handler if needed.
+
+Three modeling calls — each has a "the obvious thing might be wrong"
+twist that's worth writing down:
+
+**1. Filter is ONE knob per deck, not two.** The natural-language ask
+was "HPF + LPF filter knobs per deck". The DJ-ergonomic model is one
+knob: bypass at center, low-pass sweeping one way, high-pass the other.
+Pioneer mixers work this way. Mixxx's `QuickEffectRack1_[ChannelN]` →
+`super1` *is* this knob. Splitting it into `SetHpf` + `SetLpf` would
+either fight for the same underlying control or require dragging in
+heavier `EffectUnit` machinery. The one-knob model maps cleanly to the
+ask: "high pass deck 1" → `SetFilter(deck=1, value=1.0)`.
+
+**2. FX wet is per-deck via assignment + global unit mix.** Mixxx's
+effect-unit `mix` knob is a **global per-unit** value — there is no
+native "wet 80% on deck 1, off on deck 2 for this unit." We get the
+per-deck feel by combining the unit's `mix` with the deck's
+`group_[ChannelN]_enable` assignment toggle: value=0 → disable
+assignment (deck dry); value>0 → enable assignment + set unit mix.
+Caveat: routing both decks to the same unit shares the wet level. This
+is fine for the demo — DJs typically use one unit per deck — but
+documented as a known limit. A cleaner per-deck wet would require
+dedicated effect chains per channel.
+
+**3. Variable loops via separate `beatloop_{N}_toggle` bindings.**
+Mixxx exposes both `beatloop_size` + `beatloop_activate` (set size,
+trigger) and `beatloop_{N}_toggle` (one binding per size). The latter
+is dead simple — one MIDI note per (deck, beats) pair, Mixxx native
+toggle semantics, no JS handler needed. 6 sizes × 2 decks = 12
+bindings. Burns more note numbers but the table is trivially
+maintainable. The previous v0.1 limitation (`LoopDeck(beats=16)`
+silently mapped to 8) is now a `ValueError` from the adapter for any
+out-of-range size.
+
+**4. Pitch uses bipolar CC + JS scaling.** Mixxx's `rate` control is
+-1..+1 (±8% default pitch range). MIDI CC is 0..127 unipolar. A JS
+handler centers at 64 (`CC 64 → rate 0`) with 63 symmetric steps each
+side. The Python `SetPitch` action exposes the same -1..+1 contract
+so the action stays musically meaningful (`+1.0` = full +8%) and the
+adapter encodes the offset only at the wire.
+
+**Architectural framing.** Pure additions, no migrations: 3 new
+dataclasses in the `DJAction` union, 3 new dispatch cases in
+`MidiAdapter`, regex + LLM-prompt + signatures + undo + reset_plan all
+extended in parallel (the action vocabulary expansion checklist is
+roughly seven files; missing any of them produces a silent failure mode
+or an unhelpful error). New tests bring the regex parser from 47 →
+70 parametrized cases.
+
+**Interview line.**
+> *"v0.3 added the four moves a DJ actually does between bass swaps —
+> filter sweeps, FX throws, pitch nudges, and variable-size loops. The
+> interesting design choice was the filter: the ask was 'HPF + LPF
+> knobs' but the right model is one knob per deck — that's what Mixxx
+> exposes natively and what DJs reach for. Sometimes the user-stated
+> spec is a hint at the model, not the model itself."*
+
+**Trade-offs accepted.**
+- FX unit mix is global per unit (above).
+- Pitch range is ±8% (Mixxx default). Other ranges (±4%, ±50%) would
+  need either a different action contract or a runtime config. Out of
+  scope for v0.3.
+- Variable loops change behavior: `LoopDeck(beats=16)` now actually
+  produces a 16-beat loop where it previously snapped to 8. Calling
+  code outside `tests/` already passed plausible sizes so this is a
+  bug-fix, not a regression. Codified as `LOOP_BEAT_SIZES = (1, 2, 4,
+  8, 16, 32)` — sizes outside this set raise.
+- The "stop loop" regex still defaults to `beats=8` regardless of which
+  size is active, because the regex layer has no state read-back. If
+  the user runs a 4-beat loop and then says "kill loop", we fire the
+  8-beat toggle and Mixxx interprets that as "start an 8-beat loop"
+  rather than ending the 4-beat one. Mitigation deferred to v0.4
+  (would require feedback-driven regex routing).
+
+**Status.** Shipped 2026-05-24. After this, the parser covers the
+typical bedroom-DJ vocabulary at regex speed and the LLM has the full
+vocabulary in its system prompt for paraphrases. The mapping XML/JS
+needs to be copied to `~/Library/.../Mixxx/controllers/` and the
+controller reloaded once — same install dance as D-002.
+
+---
+
 ## D-021 · Agent layer (Tier 2, demo-scoped) — goal-directed schedules
 **Date:** 2026-05-23 · **Commit:** `a1a5327` · **Status: Shipped**
 
