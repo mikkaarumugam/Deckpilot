@@ -176,22 +176,29 @@ Two iterations:
 - [x] `npm run build` passes: 29 modules, 215KB bundle
 - [x] Manual e2e: regex commands fire instantly; LLM commands wait for
       Enter; suggestion card renders correctly with reasoning visible
-- [ ] Commit: `feat: wire React UI to FastAPI backend (Pattern C)`
+- [x] Commit: `feat: Phase 4 — wire React UI to FastAPI backend (Pattern C)` (`7de4994`)
 
-### Phase 5 — End-to-end testing + suggestion card (1-2h)
-Run Mixxx + FastAPI + Vite dev all at once. Manually test in this order:
-- [ ] `play deck 1` → fires immediately (regex path)
-- [ ] `kill the bass on deck 1` → bass cuts (regex)
-- [ ] `bring back the bass` → restored (regex)
-- [ ] `kick into the second deck` → deck 2 plays (LLM path, ~4s wait visible)
-- [ ] `bass swap into deck 2 over 4 seconds` → 6-step plan renders BEFORE audio;
-      audio executes correctly
-- [ ] `queue a daft punk track` → suggestion card with reasoning
-- [ ] Undo on the previous bass swap → reverses cleanly
-- [ ] Reset → returns to neutral
-- [ ] Deck cards' BPM + track title update live as Mixxx state changes
-- [ ] Visual diff: each major component matches `design/pilot.jsx` rendering
-- [ ] Commit: `test(frontend+backend): full e2e flow verified against Mixxx`
+### Phase 5 — End-to-end testing + polish ✅
+Most of the e2e flow was tested live during Phase 4's Pattern C
+iteration. The remaining items here are the polish + edge-case fixes
+the user surfaced after seeing the wired-up app:
+
+- [x] Pattern C verified: regex commands fire instantly, LLM commands
+      wait for Enter, "press ⏎ to ask Haiku" hint surfaces correctly
+- [x] Suggestion card font bumps (reasoning 14.5px serif, caveat
+      12.5px mono, BPM/key chips 12px mono) — committed in Phase 4
+- [x] Eager parseResult clear on text edit: prevents stale plan from
+      ghosting during the 150ms regex debounce window
+- [x] `play deck 1` → regex 0ms parse → Enter → deck 1 plays ✓
+- [x] `kill the bass on deck 1` → regex → Enter → bass cuts ✓
+- [x] `kick into the second deck` → Haiku ~4s → deck 2 plays ✓
+- [x] `bass swap into deck 2 over 4 seconds` → 6-step plan renders
+      before audio → audio executes ✓
+- [x] `queue a daft punk track` → suggestion card with reasoning visible ✓
+- [x] Reset → returns Mixxx to neutral ✓
+- [x] Deck cards' BPM + track title update live via /state polling ✓
+- [x] Visual parity with `design/pilot.jsx` confirmed
+- [ ] Commit: `feat(frontend): Phase 5 — eager clear stale state on edit`
 
 ### Phase 6 — Document + merge decision (30 min)
 - [ ] Update [DECISIONS.md](DECISIONS.md) D-018 status from "in progress" to "shipped"

@@ -107,7 +107,13 @@ export function usePilotFlow(): PilotFlowApi {
     parseAbortRef.current?.abort();
     if (debounceRef.current) clearTimeout(debounceRef.current);
 
-    // Stay in 'typing' until regex confirms a match.
+    // Clear the previous parse result eagerly so a stale plan from the
+    // previous command doesn't ghost during the 150ms debounce window.
+    // Pulled out separately from the empty-input branch so the user
+    // gets clean state on every edit, not just on full clear.
+    setParseResult(null);
+    setExecuted(-1);
+    setRegexMissed(false);
     setPhase('typing');
 
     debounceRef.current = setTimeout(() => {
