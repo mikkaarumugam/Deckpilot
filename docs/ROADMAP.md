@@ -26,13 +26,26 @@ Last updated: **2026-05-22**
 | **Lib-2** | **MIDI state read-back: play state + BPM + request handshake** | `e1c3b0e` |
 | **Lib-3** | **Library-aware LLM + LoadTrack suggestion card** | `9854fba` |
 | **UI-fix** | **Restore Material Symbols font (icon-cascade bug)** | `f86efff` |
+| **Reason** | **Surface LLM reasoning on the suggestion card** | `ae3356b` |
+| **React-1** | **Vite + React + TS scaffold + design tokens** | `f2a2411` |
+| **React-2** | **Port pilot.jsx into modular TS components** | `aaca9b2` |
+| **React-3** | **FastAPI backend wrapping deckpilot/ over HTTP** | `52deaa8` |
+| **React-4** | **React UI wired to FastAPI (Pattern C: regex eager, LLM on Enter)** | `7de4994` |
+| **React-5** | **Clear stale state on text edit + suggestion font polish** | `088092d` |
 
 Functionally end-to-end working: type or speak (via WhisperType) →
 parsed via regex or Haiku → library-aware multi-step plan visible in
-dashboard with live deck-state read-back → executed against Mixxx via
-MIDI. One-click undo. Queue of pending commands. Reset state. Sidebar
-shows live "Deck N · ▶/⏸ · 121.7 BPM · Daft Punk — Around the World".
-Track suggestions surfaced when LLM picks library content.
+the dashboard with live deck-state read-back → executed against Mixxx
+via MIDI. One-click undo. Queue of pending commands. Reset state.
+Sidebar shows live "Deck N · ▶/⏸ · 121.7 BPM · Daft Punk — Around the
+World". Track suggestions surfaced when the LLM picks library content.
+
+**Two dashboards now coexist** in the repo:
+- `app/dashboard.py` — Streamlit (the original; still works).
+- `frontend/` + `backend/` — React + FastAPI (Pattern C: regex eager,
+  LLM on Enter). The polished version, built on `feature/react-frontend`
+  per DECISIONS § D-018. Run with: quit Streamlit → `uvicorn
+  backend.main:app --port 8000 --reload` + `cd frontend && npm run dev`.
 
 ## 🔜 Next session(s) — in priority order
 

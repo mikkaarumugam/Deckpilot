@@ -6,7 +6,7 @@ matters more than the *what* (the code is the what). Newest first.
 ---
 
 ## D-018 · React + FastAPI rewrite (supersedes D-014's deferral)
-**Date:** 2026-05-23 · **Branch:** `feature/react-frontend` · **Plan:** [docs/MIGRATION.md](MIGRATION.md)
+**Date:** 2026-05-23 · **Branch:** `feature/react-frontend` · **Plan:** [docs/MIGRATION.md](MIGRATION.md) · **Status: Shipped**
 
 **Context.** D-014 (2026-05-21) deferred the FastAPI + React rewrite as P2,
 reasoning that EVAL.md and demo-video work were higher-leverage for AI PM
@@ -62,8 +62,29 @@ rm -rf frontend backend     # if created
 The branch is fully isolated until Phase 6 merges. Abandoning mid-way costs
 only the hours already invested.
 
-**Status.** In progress. See [docs/MIGRATION.md](MIGRATION.md) for the
-six-phase checklist + resume guide for cross-session continuity.
+**Status.** **Shipped 2026-05-23** on branch `feature/react-frontend`
+in six commits (`3cabfe5` → `088092d`). Total: ~6h, well under the
+10-12h budget. Streamlit dashboard kept at `app/dashboard.py` as a
+fallback; both apps coexist in the repo for the demo recording window.
+
+**One mid-flight redesign worth noting** (D-018a). Phase 4 originally
+shipped with **eager LLM parsing** — every keystroke debounce fired
+`POST /parse` which called Haiku. The user noticed this was wasteful:
+typing a paraphrase like "bass swap into deck 2 over 4 seconds" would
+fire 2-3 partial LLM calls before completing. Mid-Phase-4 we pivoted
+to **Pattern C**: regex parses eagerly (in-process, free, instant);
+LLM only fires when the user presses Enter on a regex-no-match.
+`POST /parse` gained a `mode: "auto" | "regex" | "llm"` field; mode=
+"regex" returns `error: "no_regex_match"` as a sentinel so the UI can
+show "(press ⏎ to ask Haiku)" hint without treating it as a real
+error. Captures the best of both: canonical commands feel instant,
+paraphrases are explicit, zero wasted LLM calls.
+
+See [docs/MIGRATION.md](MIGRATION.md) for the per-phase checklist
+(all checked) and the resume guide that's now of historical value.
+
+---
+
 
 ---
 

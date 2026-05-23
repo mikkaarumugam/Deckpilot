@@ -3,24 +3,26 @@
 This file is loaded automatically by Claude Code at the start of every
 session in this repo. Read it before doing anything else.
 
-> ## ⚠️ Active migration in progress (2026-05-23 →)
+> ## ✅ React + FastAPI migration shipped (2026-05-23)
 >
-> A React + FastAPI rewrite is underway on branch `feature/react-frontend`.
-> The full plan, checklist, and resume guide live in
-> [docs/MIGRATION.md](docs/MIGRATION.md). The decision rationale (which
-> supersedes D-014's earlier deferral) is in
-> [docs/DECISIONS.md](docs/DECISIONS.md) § **D-018**.
+> The React + FastAPI rewrite is complete on branch `feature/react-frontend`
+> (six commits, `3cabfe5` → `088092d`). See [docs/DECISIONS.md](docs/DECISIONS.md)
+> § **D-018** for the decision rationale and [docs/MIGRATION.md](docs/MIGRATION.md)
+> for the six-phase log (now all `[x]` — kept as historical reference).
 >
-> **If you're a fresh session picking this up:**
-> 1. Read `docs/MIGRATION.md` first — it has the six-phase checklist with
->    `[x]` / `[ ]` markers showing exactly which phase to resume from.
-> 2. The Python brain (`deckpilot/`) is intentionally untouched. The new
->    code lives in `frontend/` (Vite + React + TS) and `backend/` (FastAPI
->    wrapping `deckpilot/` via HTTP).
-> 3. Streamlit at `app/dashboard.py` is the working fallback and stays in
->    place. **Only one Python process can hold the IAC MIDI port at a
->    time** — quit Streamlit before running FastAPI.
-> 4. Visual reference for the new UI is in `design/` (3 .jsx files).
+> **Two dashboards now coexist:**
+> - **`app/dashboard.py`** — original Streamlit dashboard. Still works.
+> - **`frontend/` + `backend/`** — new React + FastAPI (Pattern C:
+>   regex eager, LLM on Enter; warm-dark theme matching `design/pilot.jsx`).
+>
+> **MIDI port conflict reminder:** only one Python process can hold the
+> IAC port at a time. Quit Streamlit before running FastAPI:
+>
+> ```bash
+> pkill -f "streamlit run"
+> uvicorn backend.main:app --port 8000 --reload   # in one terminal
+> cd frontend && npm run dev                       # in another
+> ```
 
 ## What is DeckPilot
 
@@ -76,11 +78,49 @@ deckpilot/
 │   └── reader.py           ← read-only Mixxx SQLite library access
 ├── __main__.py             ← CLI entry. Subcommands OR NL string.
 
-app/dashboard.py            ← Streamlit frontend
+backend/                    ← FastAPI HTTP wrapper (shipped D-018)
+  main.py                   ← app + CORS + lifespan + routes
+  models.py                 ← Pydantic wire-format schemas
+  services/
+    singletons.py           ← lazy LibraryReader / MidiAdapter / Executor /
+                              MixxxFeedback (all fail-soft)
+    signatures.py           ← DJAction → (fn, detail, t, dMs) display strings
+  routes/
+    parse.py                ← POST /parse (mode: auto|regex|llm)
+    execute.py              ← POST /execute (runs ActionPlan via Executor)
+    state.py                ← GET /state (MixxxFeedback snapshot + lib lookup)
+    undo.py                 ← POST /undo
+    reset.py                ← POST /reset
+
+frontend/                   ← Vite + React + TS app (shipped D-018)
+  src/
+    Pilot.tsx               ← main shell — topbar + content + footer
+    App.tsx                 ← mount point
+    types.ts                ← Phase, PlanStepState, etc.
+    api/client.ts           ← typed fetch wrappers
+    hooks/
+      usePilotFlow.ts       ← Pattern C state machine (regex eager, LLM ⏎)
+      useDeckState.ts       ← polls GET /state every 250ms
+    components/
+      CommandCard.tsx       ← hero card with input + parsed pill + plan
+      PlanStep.tsx          ← rail+node timeline item
+      DeckCard.tsx          ← live deck panel with BPM + track
+      HistoryItem.tsx       ← history row with undo
+      Chip.tsx              ← rounded suggestion chip
+      PhaseBadge.tsx        ← top-right phase indicator
+      RunButton.tsx         ← morphs by phase
+      BPMPulse.tsx          ← BPM-synced pulsing dot
+    styles/theme.css        ← design tokens + keyframes + button classes
+
+design/                     ← input reference from Claude Design
+  pilot.jsx, app.jsx, tweaks-panel.jsx
+
+app/dashboard.py            ← Streamlit frontend (still works; backup)
 scripts/send_test_note.py   ← Sanity test: Python → IAC → Mixxx
 tests/test_parser.py        ← 47 parametrized tests for regex
 tests/eval.py               ← the eval harness backing docs/EVAL.md
-docs/                       ← ARCHITECTURE, DECISIONS, ROADMAP, GOTCHAS, EVAL, …
+docs/                       ← ARCHITECTURE, DECISIONS, ROADMAP, GOTCHAS,
+                              EVAL, MIGRATION, AGENT_DESIGN, …
 ```
 
 ## How to run things

@@ -219,6 +219,58 @@ A request-state handshake (note 0x7F) fires once at MixxxFeedback
 startup so the sidebar gets initial state instead of waiting for
 the next change.
 
+## Frontend / Backend split (Session 6, shipped 2026-05-23)
+
+The original Streamlit dashboard was supplemented by a React + FastAPI
+stack — see DECISIONS § D-018 for the rationale. The Python brain
+(`deckpilot/`) is unchanged; the new layers wrap it.
+
+```
+       ┌─────────────────────────────────────────────┐
+       │  frontend/  (Vite + React + TS, port 5173)  │
+       │  - Pilot.tsx                                │
+       │  - usePilotFlow (Pattern C state machine)   │
+       │  - useDeckState (polls /state @ 250ms)      │
+       └────────────────────┬────────────────────────┘
+                            │  HTTP (CORS-allowed)
+                            ▼
+       ┌─────────────────────────────────────────────┐
+       │  backend/  (FastAPI, port 8000)             │
+       │  - /parse  → core.parser.parse              │
+       │  - /execute → core.executor.run_plan        │
+       │  - /state  → adapters.midi_feedback         │
+       │  - /undo   → core.undo.inverse_plan         │
+       │  - /reset  → core.undo.reset_plan           │
+       └────────────────────┬────────────────────────┘
+                            │ imports
+                            ▼
+       ┌─────────────────────────────────────────────┐
+       │  deckpilot/  (Python brain — unchanged)     │
+       │  - core/parser, core/executor, core/undo    │
+       │  - adapters/midi, adapters/midi_feedback    │
+       │  - library/reader                           │
+       └─────────────────────────────────────────────┘
+```
+
+**Pattern C** (the parse-flow design — D-018a):
+
+- Each keystroke in the React input fires a debounced `api.parse(text,
+  "regex")`. Regex is in-process + free + instant, so eager.
+- If regex matches → plan renders immediately (`phase = "ready"`).
+- If regex doesn't match → UI shows `(press ⏎ to ask Haiku)` hint
+  but no LLM call happens yet.
+- User presses Enter on a no-match → `api.parse(text, "auto")` fires
+  the LLM (`phase = "parsing"` → ~3-12s wait).
+- Enter on a ready plan → `api.execute(plan)` runs it.
+
+This matches Cursor's compose pattern (Cmd+Enter for AI) and avoids
+the wasted LLM calls of eager-parse approaches.
+
+**MIDI port conflict.** Only one Python process can hold the IAC
+output port at a time. Streamlit (`app/dashboard.py`) and FastAPI
+(`backend.main`) compete for it — quit one before running the other.
+The Streamlit dashboard stays in the repo as a working fallback.
+
 ## Future: agent layer (parked)
 
 The architecture is designed to receive an agentic upgrade without a

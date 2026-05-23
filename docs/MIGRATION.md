@@ -200,14 +200,17 @@ the user surfaced after seeing the wired-up app:
 - [x] Visual parity with `design/pilot.jsx` confirmed
 - [ ] Commit: `feat(frontend): Phase 5 — eager clear stale state on edit`
 
-### Phase 6 — Document + merge decision (30 min)
-- [ ] Update [DECISIONS.md](DECISIONS.md) D-018 status from "in progress" to "shipped"
-- [ ] Update [ROADMAP.md](ROADMAP.md) — React migration in Shipped, demo video still pending
-- [ ] Update [CLAUDE.md](../CLAUDE.md) file map: add `frontend/` and `backend/` sections
-- [ ] Update [ARCHITECTURE.md](ARCHITECTURE.md): new "Frontend / Backend split" section
-- [ ] Decide: merge to main now, or keep on branch until demo video records cleanly
-- [ ] If merging: `git checkout main && git merge --ff-only feature/react-frontend`
-- [ ] If holding: leave branch; demo from `feature/react-frontend`
+### Phase 6 — Document + merge decision (30 min) ✅
+- [x] DECISIONS.md D-018 status flipped to "Shipped"; added D-018a
+      sub-note about the eager-LLM → Pattern C pivot mid-Phase-4
+- [x] ROADMAP.md — five new "React-*" entries in Shipped; added the
+      two-dashboards-coexist explainer paragraph
+- [x] CLAUDE.md top-of-file callout updated to "shipped" + comprehensive
+      file map covering both backend/ and frontend/ layouts
+- [x] ARCHITECTURE.md — new "Frontend / Backend split" section with
+      a diagram + Pattern C explanation + MIDI port conflict reminder
+- [x] Commit: `docs: Phase 6 — DECISIONS/ROADMAP/CLAUDE/ARCH for D-018 shipped`
+- [ ] **Merge decision pending** — see prompt at end of this file
 
 ## Deliberate non-goals for day 1
 
@@ -254,3 +257,23 @@ streamlit run app/dashboard.py   # back to v0.3
 ```
 
 The migration is non-destructive on `main` until Phase 6 merges.
+
+## Merge decision
+
+All six phases shipped on the branch (`3cabfe5` → `088092d`, six
+commits). The branch is in working order; both apps run side-by-side.
+
+Two reasonable paths from here:
+
+**Merge now.** Branch fast-forwards into `main`. Streamlit stays in
+the repo (as documented) but the React + FastAPI stack becomes the
+canonical demo target. Demo video records against the new UI.
+
+**Hold until demo records.** Keep `feature/react-frontend` as the
+demo branch; record against it. Merge to `main` immediately after the
+demo lands. Lower risk if surprises surface during recording — you can
+fix on the branch without re-merging.
+
+Either path: see commits `3cabfe5` `f2a2411` `aaca9b2` `52deaa8`
+`7de4994` `088092d` for the per-phase deltas.
+
