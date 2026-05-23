@@ -5,6 +5,105 @@ matters more than the *what* (the code is the what). Newest first.
 
 ---
 
+## D-021 · Agent layer (Tier 2, demo-scoped) — goal-directed schedules
+**Date:** 2026-05-23 · **Commit:** *(pending)* · **Status: Shipped**
+
+**Context.** Through D-020 the system was still a *smart MIDI controller*:
+text in → ActionPlan → executor runs it → silence. Every action required
+a user prompt. The "Thread 4 agent layer" was the parked direction —
+specifically the **goal-directed planning** flavour: user gives a high-
+level goal ("play X then auto-transition into Y when X is nearly done"),
+system decomposes + executes autonomously, monitors playback, fires the
+next step when its trigger condition hits.
+
+Two factors made this newly cheap this session:
+1. **Playhead position read-back** shipped earlier today (mirror of D-016/
+   D-017's BPM pattern). Without position, "trigger when track is X% done"
+   is impossible. With it, the trigger is one float comparison.
+2. The substrate is otherwise complete — multi-step plans (D-011), auto-
+   load (D-019), state read-back, library awareness, streaming (D-020).
+   Nothing about the agent layer required rewriting prior work.
+
+**Decision.** Add a new abstraction above ActionPlan:
+- `Trigger` union: `Immediate` (fires on start) | `DeckPosition(deck, at)`
+  (fires when deck N's playhead crosses fraction X).
+- `ScheduledPlan = (Trigger, ActionPlan, label)` — a plan that waits for
+  a trigger.
+- `AgentSchedule = tuple[ScheduledPlan, ...]` — an ordered sequence.
+
+Add a singleton `AgentRuntime` that holds at most one active
+`AgentSchedule`, polls Mixxx state at 500ms, and fires each step's
+ActionPlan via the existing Executor when its trigger condition hits.
+Single `asyncio.Lock` serialises plan execution — manual `/execute`
+requests can't race against scheduled firings.
+
+Extend the LLM prompt with goal-decomposition guidance: when the user
+describes a timed sequence ("then", "when X ends", "after"), Haiku emits
+`{"schedule": [...]}` instead of `{"plan": [...]}`. Same JSON wire shape,
+different top-level key — parser branches.
+
+Three new routes (`POST /agent/start`, `POST /agent/cancel`,
+`GET /agent/state`), one new React component (`AgentQueue`), one new
+hook (`useAgentState`).
+
+**Demo-scope limits** (deliberately punted to v0.4+):
+- **Only two trigger types.** Beat-aware triggers (`AfterBeats(8)`,
+  `OnDownbeat`) need beat-grid read-back — not shipped yet. The
+  position-based trigger covers ~80% of useful agent behaviour without it.
+- **No recovery / re-planning.** If the LLM emits a schedule with bad
+  track assumptions (wrong duration, wrong BPM), the user cancels +
+  re-prompts. A self-correcting scheduler is a much bigger build.
+- **No multi-schedule queue.** Only one active schedule at a time.
+- **No manual override mid-schedule.** Cancel is all-or-nothing.
+- **No nested goals.** A ScheduledPlan's plan is a flat ActionPlan, not
+  another schedule. Recursive schedules are unnecessary at this scope.
+
+**Architectural framing.**
+- `core/agent.py` lives next to `core/actions.py` + `core/executor.py` —
+  it's a peer abstraction, not a layer above. The existing Executor still
+  walks atomic timelines; AgentRuntime orchestrates *which* ActionPlans
+  run *when*.
+- The same `_payload_to_action` / `_payload_to_plan` helpers serialize
+  schedules — no new action vocabulary, just a new envelope.
+- Manual `/execute` still works unchanged. The agent layer is opt-in
+  per-prompt based on what the LLM emits.
+
+**Interview line.**
+> *"DeckPilot now does goal-directed autonomous mixing. User describes a
+> sequence; Haiku decomposes it into an AgentSchedule — a list of
+> ActionPlans gated by trigger conditions (playhead position, immediate).
+> A background scheduler polls Mixxx state at 500ms and fires each plan
+> when its condition hits. Adding beat-aware triggers and re-planning
+> would extend the same model; the architecture is right-sized for v0.4
+> work."*
+
+**Trade-offs accepted.**
+- LLM reliability on schedule shape is the main failure mode. We mitigate
+  with strict validation (`_payload_to_schedule` raises ParseError on any
+  shape deviation) but Haiku may sometimes default to `{"plan": [...]}`
+  even for goal-style prompts. Sonnet routing for this specific case is
+  the documented escape hatch ([D-008](#d-008--haiku-not-sonnet-or-opus-for-the-llm-parser)).
+- Position read-back has ~1/128 resolution. A `DeckPosition(at=0.92)`
+  trigger may fire ~1-2 seconds early or late depending on where the CC
+  step lands. Tolerable for the "transition near end" use case;
+  surgical timing requires beat-grid awareness.
+- Background polling runs at 500ms even when no schedule is active. The
+  task idles cheaply but it's still a heartbeat. Could be event-driven
+  later.
+
+**Status.** Shipped 2026-05-23. The demo prompt of record:
+> *"play berlioz la danse on deck 1, then when it's nearly done,
+> auto-transition into highjack on deck 2 with a bass swap over 8 seconds"*
+
+The Run button kicks off the schedule; AgentQueue shows the pending
+"transition into highjack" step with a live countdown
+("deck 1 → 23% to go"). When berlioz crosses 92%, the transition fires
+autonomously. User does nothing for ~3 minutes.
+
+That's the autonomous moment.
+
+---
+
 ## D-020 · Stream LLM parses via Server-Sent Events, no API key swap
 **Date:** 2026-05-23 · **Commit:** `fa1c2d6` · **Status: Shipped**
 

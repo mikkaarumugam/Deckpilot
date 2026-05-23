@@ -22,7 +22,13 @@ from pydantic import BaseModel, Field
 
 
 class TrackPayload(BaseModel):
-    """A library track, projected for the UI."""
+    """A library track, projected for the UI.
+
+    Note: artwork isn't an explicit field — the UI always renders
+    <img src="/artwork/{id}"/> with an onError handler that falls back
+    to a placeholder. Cleaner than probing the file from this hot-path
+    serializer; the browser caches the 404 after the first miss.
+    """
 
     id: int
     artist: str
@@ -112,9 +118,10 @@ class SuggestionPayload(BaseModel):
 class ParseResponse(BaseModel):
     """What /parse returns.
 
-    Carries either a runnable plan OR a suggestion (when the LLM picked
-    a track for the user). `error` is set when parsing failed cleanly;
-    HTTP 5xx covers unexpected failures.
+    Carries either a runnable plan, a suggestion (LoadTrack), OR an
+    agent schedule (goal-style prompt; D-021). Exactly one of `plan`
+    or `schedule` is populated for any given response. The frontend
+    routes schedules to /agent/start instead of /execute.
     """
 
     text: str
@@ -124,6 +131,9 @@ class ParseResponse(BaseModel):
     source: Literal["regex", "llm"]
     plan: list[PlanStepPayload] = Field(default_factory=list)
     suggestion: SuggestionPayload | None = None
+    # Populated when the LLM emitted a goal-style schedule. None for
+    # ordinary single-shot plans. See D-021 for the design.
+    schedule: list[ScheduledPlanPayload] | None = None
     error: str | None = None
 
 
@@ -166,4 +176,51 @@ class UndoRequest(BaseModel):
 class UndoResponse(BaseModel):
     success: bool
     inverted_plan: list[PlanStepPayload] | None = None
+    error: str | None = None
+
+
+# ── Agent (D-021: goal-directed schedules) ────────────────────────────────
+
+
+class TriggerPayload(BaseModel):
+    """Wire format for a trigger. `type` is the discriminator; deck/at
+    are populated only when type == 'deck_position'."""
+
+    type: Literal["immediate", "deck_position"]
+    deck: int | None = None
+    at: float | None = None
+
+
+class ScheduledPlanPayload(BaseModel):
+    """One entry in an AgentSchedule: trigger + plan to run when it fires."""
+
+    trigger: TriggerPayload
+    plan: list[PlanStepPayload]
+    label: str
+
+
+class AgentStartRequest(BaseModel):
+    schedule: list[ScheduledPlanPayload]
+
+
+class AgentStepStatus(BaseModel):
+    """One row in the /agent/state response — what the UI's queue shows."""
+
+    label: str
+    trigger_kind: Literal["immediate", "deck_position"]
+    trigger_deck: int | None = None
+    trigger_at: float | None = None
+    status: Literal["done", "running", "pending"]
+
+
+class AgentStateResponse(BaseModel):
+    active: bool
+    started_at_unix: float | None = None
+    steps: list[AgentStepStatus] = Field(default_factory=list)
+
+
+class AgentSimpleResponse(BaseModel):
+    """For /agent/start + /agent/cancel — just success + optional error."""
+
+    success: bool
     error: str | None = None

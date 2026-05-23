@@ -145,6 +145,63 @@ class LibraryReader:
         results = self._query("library.id = ?", (track_id,))
         return results[0] if results else None
 
+    def get_artwork(self, track_id: int) -> tuple[bytes, str] | None:
+        """Read embedded album art from a track's audio file.
+
+        Returns (image_bytes, mime_type) on success, None when the file
+        has no embedded art OR can't be opened (deleted, codec issue).
+        We deliberately don't fall back to anywhere else — the caller
+        renders a placeholder for the None case.
+
+        mutagen handles all the audio formats Mixxx supports (MP3 via
+        ID3, M4A via MP4, FLAC, OGG). Each container stores artwork
+        differently, so the branching below normalizes the result.
+        """
+        track = self.get_by_id(track_id)
+        if track is None or not track.location:
+            return None
+
+        # Local import: mutagen is only needed for this path, no point
+        # adding it to top-level import time for callers that never use it.
+        try:
+            from mutagen import File as MutagenFile
+        except ImportError:
+            return None
+
+        try:
+            audio = MutagenFile(track.location)
+        except Exception:
+            # File deleted, malformed, or codec unsupported — caller
+            # gets None and renders the no-art placeholder.
+            return None
+        if audio is None:
+            return None
+
+        # MP3 / ID3: artwork lives in APIC frames keyed like "APIC:" or
+        # "APIC:Cover (front)". Take the first one we find.
+        if hasattr(audio, "tags") and audio.tags is not None:
+            for key in audio.tags.keys():
+                if key.startswith("APIC"):
+                    apic = audio.tags[key]
+                    return (apic.data, apic.mime or "image/jpeg")
+
+        # MP4 / M4A: artwork lives in the "covr" atom as a list of
+        # MP4Cover objects. imageformat tells us PNG vs JPEG.
+        if hasattr(audio, "tags") and audio.tags is not None:
+            covers = audio.tags.get("covr")
+            if covers:
+                cover = covers[0]
+                # mutagen MP4Cover.FORMAT_PNG = 14, FORMAT_JPEG = 13
+                mime = "image/png" if cover.imageformat == 14 else "image/jpeg"
+                return (bytes(cover), mime)
+
+        # FLAC / OGG: pictures are on audio.pictures, not in tags.
+        if hasattr(audio, "pictures") and audio.pictures:
+            pic = audio.pictures[0]
+            return (pic.data, pic.mime or "image/jpeg")
+
+        return None
+
     def count_search_matches(self, query: str) -> int:
         """Approximate how many rows Mixxx's library search would show
         for `query`. Used by the GUI auto-load path (D-019) as a

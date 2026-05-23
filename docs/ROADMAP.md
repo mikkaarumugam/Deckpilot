@@ -34,6 +34,8 @@ Last updated: **2026-05-23**
 | **React-5** | **Clear stale state on text edit + suggestion font polish** | `088092d` |
 | **GUI-1** | **MixxxGuiAdapter + auto-load via osascript (D-019 supersedes D-015)** | `fa1c2d6` |
 | **Stream-1** | **SSE streaming for LLM parses — plan steps reveal as Haiku generates (D-020)** | `fa1c2d6` |
+| **Pos-1** | **Playhead position read-back via MIDI scripted output (substrate for D-021)** | *(pending)* |
+| **Agent-1** | **Demo-scoped Tier 2 agent layer: goal-directed schedules with triggers (D-021)** | *(pending)* |
 
 Functionally end-to-end working: type or speak (via WhisperType) →
 parsed via regex or Haiku → library-aware multi-step plan visible in

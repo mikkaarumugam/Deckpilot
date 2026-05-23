@@ -64,7 +64,7 @@ export function PhaseBadge({ phase, totalSteps, currentStep }: PhaseBadgeProps) 
           borderRadius: 99,
           background: c.dot,
           boxShadow: cfg.tone === 'live' ? `0 0 8px ${c.dot}` : 'none',
-          animation: c.pulse ? 'pilotPulse 1.4s ease-in-out infinite' : 'none',
+          animation: c.pulse ? 'pilotPulse var(--p-beat-2-ms) ease-in-out infinite' : 'none',
         }}
       />
       <span>{cfg.text}</span>

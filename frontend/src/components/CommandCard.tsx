@@ -16,6 +16,7 @@
 
 import {
   type ParseResponse,
+  type ScheduledPlanPayload,
   type SuggestionPayload,
 } from '../api/client';
 import { type Phase, type PlanStepState } from '../types';
@@ -106,7 +107,7 @@ export function CommandCard({
         border: '1px solid var(--p-border-strong)',
         borderRadius: 18,
         padding: '20px 24px 20px',
-        animation: 'pilotGlow 4s ease-in-out infinite',
+        animation: 'pilotGlow var(--p-beat-8-ms) ease-in-out infinite',
       }}
     >
       {/* Top row: label + phase badge */}
@@ -123,7 +124,7 @@ export function CommandCard({
             display: 'flex',
             alignItems: 'center',
             gap: 6,
-            font: '500 10px/1 var(--p-mono)',
+            font: '500 11px/1 var(--p-mono)',
             color: 'var(--p-muted)',
             letterSpacing: '0.18em',
             textTransform: 'uppercase',
@@ -135,16 +136,18 @@ export function CommandCard({
         <PhaseBadge phase={phase} totalSteps={totalSteps} currentStep={currentStep} />
       </div>
 
-      {/* Typed command — real <input> styled to match the design */}
+      {/* Typed command — real <input> styled to match the design.
+          Bumped from 28px → 48px for hero scale; drama through size
+          instead of decoration (see UI overhaul note). */}
       <div
         style={{
           display: 'flex',
           alignItems: 'baseline',
-          gap: 8,
-          font: 'italic 400 28px/1.2 var(--p-serif)',
+          gap: 14,
+          font: 'italic 400 48px/1.1 var(--p-serif)',
           color: 'var(--p-fg)',
-          minHeight: 36,
-          letterSpacing: '-0.01em',
+          minHeight: 56,
+          letterSpacing: '-0.02em',
         }}
       >
         <span style={{ color: 'var(--p-accent)', fontStyle: 'normal' }}>›</span>
@@ -182,11 +185,11 @@ export function CommandCard({
             display: 'inline-flex',
             alignItems: 'center',
             gap: 8,
-            padding: '6px 10px',
+            padding: '7px 12px',
             background: 'var(--p-accent-dim)',
             border: '1px solid var(--p-accent-edge)',
             borderRadius: 8,
-            font: '500 12px/1 var(--p-mono)',
+            font: '500 13.5px/1 var(--p-mono)',
             color: 'var(--p-fg)',
           }}
         >
@@ -194,7 +197,7 @@ export function CommandCard({
           <span>{parsedLabel}</span>
         </div>
         {confValue > 0 && (
-          <span style={{ font: '400 11.5px/1 var(--p-mono)', color: 'var(--p-muted)' }}>
+          <span style={{ font: '400 12px/1 var(--p-mono)', color: 'var(--p-muted)' }}>
             {confValue}% confident
           </span>
         )}
@@ -228,7 +231,9 @@ export function CommandCard({
         </div>
       )}
 
-      {/* Plan OR Suggestion */}
+      {/* Plan OR Suggestion OR Schedule preview.
+          Schedule preview (D-021) wins over plan when the LLM emitted
+          a goal-style response. Run hands off to /agent/start. */}
       {suggestion ? (
         <SuggestionPanel
           suggestion={suggestion}
@@ -236,6 +241,8 @@ export function CommandCard({
           autoLoadCountdownMs={autoLoadCountdownMs}
           onCancelAutoLoad={onCancelAutoLoad}
         />
+      ) : parseResult?.schedule && parseResult.schedule.length > 0 ? (
+        <SchedulePreview schedule={parseResult.schedule} />
       ) : (
         <PlanArea
           plan={plan}
@@ -270,44 +277,21 @@ function PlanArea({
   regexMissed: boolean;
   hasText: boolean;
 }) {
+  // UI overhaul: dropped the "Plan · N steps" header + decorative SVG
+  // node icon. Plan steps now speak for themselves; whitespace + the
+  // streaming reveal carry the rhythm. The stepWord prop is no longer
+  // used here but stays on the type to avoid churning the caller.
+  void stepWord;
   return (
     <div
       style={{
-        marginTop: 18,
-        paddingTop: 16,
+        marginTop: 24,
+        paddingTop: 18,
         borderTop: '1px dashed var(--p-border)',
         opacity: showDim ? 0.25 : 1,
         transition: 'opacity 0.3s',
       }}
     >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: 14,
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            font: '500 10px/1 var(--p-mono)',
-            color: 'var(--p-muted)',
-            letterSpacing: '0.18em',
-            textTransform: 'uppercase',
-          }}
-        >
-          <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-            <circle cx="5" cy="5" r="4" stroke="var(--p-accent)" strokeWidth="1.2" fill="none" />
-            <circle cx="5" cy="5" r="1.5" fill="var(--p-accent)" />
-          </svg>
-          <span>
-            Plan · {plan.length} step{stepWord}
-          </span>
-        </div>
-      </div>
       <div style={{ display: 'flex', flexDirection: 'column' }}>
         {plan.map((step, i) => (
           <PlanStep
@@ -373,7 +357,7 @@ function StreamingTail() {
           height: 6,
           borderRadius: 99,
           background: 'var(--p-accent)',
-          animation: 'pilotPulse 1.2s ease-in-out infinite',
+          animation: 'pilotPulse var(--p-beat-2-ms) ease-in-out infinite',
         }}
       />
       <span>streaming next step…</span>
@@ -533,4 +517,105 @@ function SuggestionPanel({
       )}
     </div>
   );
+}
+
+/** SchedulePreview — shown when parseResult.schedule is populated (a
+ *  D-021 goal-style response). Renders each scheduled step as a row
+ *  with its trigger description and the count of atomic actions
+ *  inside. The Run button (above) dispatches to /agent/start; once
+ *  running, the AgentQueue panel takes over the visualisation. */
+function SchedulePreview({ schedule }: { schedule: ScheduledPlanPayload[] }) {
+  return (
+    <div
+      style={{
+        marginTop: 18,
+        paddingTop: 18,
+        borderTop: '1px dashed var(--p-border)',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          font: '500 11px/1 var(--p-mono)',
+          color: 'var(--p-accent)',
+          letterSpacing: '0.18em',
+          textTransform: 'uppercase',
+          marginBottom: 14,
+        }}
+      >
+        <span>🤖 Agent schedule · {schedule.length} step{schedule.length === 1 ? '' : 's'}</span>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {schedule.map((step, i) => (
+          <div
+            key={i}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              padding: '8px 12px',
+              background: 'var(--p-surface)',
+              border: '1px solid var(--p-border)',
+              borderRadius: 8,
+            }}
+          >
+            <span
+              style={{
+                font: '500 11px/1 var(--p-mono)',
+                color: 'var(--p-muted-deep)',
+                width: 18,
+              }}
+            >
+              {String(i + 1).padStart(2, '0')}
+            </span>
+            <span
+              style={{
+                flex: 1,
+                font: 'italic 400 15.5px/1.2 var(--p-serif)',
+                color: 'var(--p-fg)',
+                letterSpacing: '-0.005em',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {step.label}
+            </span>
+            <span style={{ font: '500 10.5px/1 var(--p-mono)', color: 'var(--p-muted)' }}>
+              {describeTriggerInline(step)}
+            </span>
+            <span
+              style={{
+                font: '500 10.5px/1 var(--p-mono)',
+                color: 'var(--p-muted-deep)',
+                letterSpacing: '0.04em',
+              }}
+            >
+              {step.plan.length} {step.plan.length === 1 ? 'act' : 'acts'}
+            </span>
+          </div>
+        ))}
+      </div>
+      <div
+        style={{
+          marginTop: 10,
+          font: '400 11.5px/1.4 var(--p-mono)',
+          color: 'var(--p-muted)',
+        }}
+      >
+        Hit Run to start. The agent will fire each step when its trigger condition hits.
+      </div>
+    </div>
+  );
+}
+
+function describeTriggerInline(step: ScheduledPlanPayload): string {
+  const t = step.trigger;
+  if (t.type === 'immediate') return 'now';
+  if (t.type === 'deck_position' && t.deck != null && t.at != null) {
+    return `deck ${t.deck} @ ${Math.round(t.at * 100)}%`;
+  }
+  return '—';
 }

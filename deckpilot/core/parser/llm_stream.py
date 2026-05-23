@@ -32,7 +32,9 @@ from .llm import (
     TIMEOUT_SECONDS,
     LLMParseError,
     _payload_to_plan,
+    _payload_to_schedule,
     build_system_prompt,
+    payload_has_schedule,
 )
 
 if TYPE_CHECKING:
@@ -226,10 +228,14 @@ async def stream_parse_llm(
             return
 
         # End of stream — do the final, strict parse on the full text
-        # so the caller gets a validated ActionPlan with the same
-        # guarantees as the synchronous path.
+        # so the caller gets a validated ActionPlan / AgentSchedule
+        # with the same guarantees as the synchronous path.
         try:
             payload = _extract_json(full_text)
+            if payload_has_schedule(payload):
+                schedule = _payload_to_schedule(payload, original_text=text)
+                yield {"type": "complete", "schedule": schedule}
+                return
             plan = _payload_to_plan(payload, original_text=text)
         except ParseError as exc:
             yield {"type": "error", "message": str(exc)}

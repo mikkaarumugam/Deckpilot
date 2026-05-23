@@ -272,14 +272,15 @@ Binding modes:
              without re-asking Mixxx. Listener: deckpilot/adapters/midi_feedback.py.
 
              Play state goes through standard <output> bindings (binary, fires
-             when the watched value crosses <minimum>). BPM is continuous and
-             needs scaled output, so it's emitted from DeckPilot.midi.js via
+             when the watched value crosses <minimum>). Continuous controls
+             (BPM, playposition) are scaled + sent from DeckPilot.midi.js via
              engine.makeConnection — see that file's init().
 
              Numbering keeps outputs in their own band so we can sniff the wire
              without confusion:
                - Play state notes: 0x10 (deck 1), 0x11 (deck 2)
                - BPM CCs:          0x30 (deck 1), 0x31 (deck 2)  (sent from JS)
+               - Position CCs:     0x32 (deck 1), 0x33 (deck 2)  (sent from JS)
              Send-side bindings (above) start at 0x14 / 0x3C — no collision. -->
         <!-- =================================================================== -->
         <outputs>

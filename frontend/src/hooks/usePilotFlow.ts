@@ -209,6 +209,7 @@ export function usePilotFlow(): PilotFlowApi {
       source: 'llm',
       plan: [],
       suggestion: null,
+      schedule: null,
       error: null,
     });
     setExecuted(-1);
@@ -376,11 +377,67 @@ export function usePilotFlow(): PilotFlowApi {
     setPhase('typing');
   }, []);
 
+  // ── Agent: dispatch a schedule to /agent/start (D-021) ────────────────
+  //
+  // Goal-style prompts (with "then" / "when X ends" / etc.) come back
+  // from /parse as schedule responses. They run autonomously via the
+  // backend's AgentRuntime — the frontend just kicks them off, then
+  // useAgentState polling drives the AgentQueue UI.
+
+  const runSchedule = (toRun: ParseResponse) => {
+    if (!toRun.schedule || toRun.schedule.length === 0) return;
+
+    setPhase('running');
+    setError(null);
+    setExecuted(-1);
+
+    const controller = new AbortController();
+    executeAbortRef.current = controller;
+
+    void api
+      .agentStart(toRun.schedule, controller.signal)
+      .then((res) => {
+        if (controller.signal.aborted) return;
+        if (!res.success) {
+          setError(res.error ?? 'Agent start failed.');
+          setPhase('ready');
+          return;
+        }
+        // Schedule is running on the backend. Phase stays at 'running'
+        // to dim the input area; useAgentState polling updates the
+        // AgentQueue UI. The user sees "done" when they cancel or all
+        // steps complete (polling reflects active=false).
+        setHistory((h) => [
+          {
+            when: 'just now',
+            prompt: toRun.text,
+            parsed: toRun.parsed,
+            summary: `Started ${toRun.schedule!.length}-step agent schedule.`,
+            isNew: true,
+          },
+          ...h.slice(0, 9),
+        ]);
+        setPhase('done');
+      })
+      .catch((err) => {
+        if ((err as Error).name === 'AbortError') return;
+        setError((err as Error).message);
+        setPhase('ready');
+      });
+  };
+
   // ── onSubmit (Enter / Run button) ─────────────────────────────────────
 
   const onSubmit = useCallback(() => {
     if (phase === 'running' || phase === 'parsing') return;
     if (suggestion) return; // can't run suggestions
+
+    // Schedule trumps plan — goal-style prompts go to the agent
+    // runtime, not the synchronous executor.
+    if (parseResult && parseResult.schedule && parseResult.schedule.length > 0) {
+      runSchedule(parseResult);
+      return;
+    }
 
     if (parseResult && parseResult.plan.length > 0) {
       runPlan(parseResult);

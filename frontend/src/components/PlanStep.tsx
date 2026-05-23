@@ -56,7 +56,7 @@ export function PlanStep({ n, step, last, state }: PlanStepProps) {
             justifyContent: 'center',
             transition: 'background 0.25s, border-color 0.25s, box-shadow 0.25s',
             boxShadow: isRunning ? '0 0 0 4px var(--p-accent-dim)' : 'none',
-            animation: isRunning ? 'pilotNodePulse 1.1s ease-in-out infinite' : 'none',
+            animation: isRunning ? 'pilotNodePulse var(--p-beat-2-ms) ease-in-out infinite' : 'none',
           }}
         >
           {isDone && (
@@ -90,12 +90,12 @@ export function PlanStep({ n, step, last, state }: PlanStepProps) {
       {/* Body */}
       <div style={{ flex: 1, paddingBottom: last ? 0 : 10, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-          <span style={{ font: '500 10px/1 var(--p-mono)', color: 'var(--p-muted-deep)' }}>
+          <span style={{ font: '500 11.5px/1 var(--p-mono)', color: 'var(--p-muted-deep)' }}>
             {String(n).padStart(2, '0')}
           </span>
           <span
             style={{
-              font: '500 12px/1.2 var(--p-mono)',
+              font: '500 14px/1.2 var(--p-mono)',
               color: isPending ? 'var(--p-fg-dim)' : 'var(--p-fg)',
               transition: 'color 0.25s',
             }}
@@ -104,14 +104,14 @@ export function PlanStep({ n, step, last, state }: PlanStepProps) {
           </span>
           <span style={{ flex: 1 }} />
           {step.t && step.t !== '—' && (
-            <span style={{ font: '500 10.5px/1 var(--p-mono)', color: 'var(--p-muted)' }}>
+            <span style={{ font: '500 11.5px/1 var(--p-mono)', color: 'var(--p-muted)' }}>
               {step.t}
             </span>
           )}
           {isDone && (
             <span
               style={{
-                font: '500 10px/1 var(--p-mono)',
+                font: '500 11px/1 var(--p-mono)',
                 color: 'var(--p-live)',
                 letterSpacing: '0.08em',
               }}
@@ -124,7 +124,7 @@ export function PlanStep({ n, step, last, state }: PlanStepProps) {
           style={{
             marginTop: 4,
             marginLeft: 22,
-            font: '400 11.5px/1.4 var(--p-mono)',
+            font: '400 12.5px/1.4 var(--p-mono)',
             color: isPending ? 'var(--p-muted)' : 'var(--p-fg-dim)',
             whiteSpace: 'nowrap',
             overflow: 'hidden',

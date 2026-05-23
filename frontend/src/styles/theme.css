@@ -9,34 +9,70 @@
    tokens isolated from anything Vite/React might inject. */
 
 :root {
-  /* Dark theme (default). To switch: replace this block with the light values
-     from design/pilot.jsx lines 43-55, or wrap the app in a class and
-     scope a light-mode override. */
-  --p-bg: #0c0b09;
-  --p-surface: #16140f;
-  --p-surface-hi: #1d1a14;
+  /* Dark theme (default). Was warm-brown-black in the original design
+     (#0c0b09); we shifted to near-pure black for a more nocturnal /
+     boiler-room feel — see the UI overhaul note in DECISIONS. */
+  --p-bg: #070707;
+  --p-surface: #0f0e0c;
+  --p-surface-hi: #181614;
   --p-border: rgba(255, 236, 200, 0.07);
   --p-border-strong: rgba(255, 236, 200, 0.14);
   --p-fg: #f1ebe0;
   --p-fg-dim: #bdb6a8;
-  --p-muted: #7a7468;
-  --p-muted-deep: #534e44;
+  /* Muted tiers brightened from the original design (was #7a7468 /
+     #534e44) — those failed WCAG AA contrast against the true-black
+     background after the UI overhaul. Bumped proportionally so the
+     hierarchy stays but small mono labels read comfortably. */
+  --p-muted: #9a9388;
+  --p-muted-deep: #6e6859;
   --p-live: #9ec98a;
   --p-live-dim: rgba(158, 201, 138, 0.18);
 
-  /* Accent — coral, the design's default. To re-tint: change --p-accent and
-     the three derived tokens will follow via color-mix(). */
-  --p-accent: #f08760;
-  --p-accent-dim: color-mix(in srgb, #f08760 16%, transparent);
-  --p-accent-edge: color-mix(in srgb, #f08760 38%, transparent);
-  --p-accent-ink: color-mix(in srgb, #f08760 22%, #0a0805 86%);
+  /* Accent — hot coral. Original design used #f08760 (warmer / softer);
+     we saturated it to #ff5a2e for more urgency. Existing localStorage
+     blobs are auto-migrated to the new value (see useTweaks.ts). */
+  --p-accent: #ff5a2e;
+  --p-accent-dim: color-mix(in srgb, #ff5a2e 16%, transparent);
+  --p-accent-edge: color-mix(in srgb, #ff5a2e 38%, transparent);
+  --p-accent-ink: color-mix(in srgb, #ff5a2e 22%, #0a0805 86%);
+
+  /* Beat-bound motion. JS writes the live deck BPM into --p-beat-ms;
+     keyframe durations derive multiples (2 / 4 / 8 beats). Default
+     500ms = 120 BPM, used when no deck is playing. See useBpmSync. */
+  --p-beat-ms: 500ms;
+  --p-beat-2-ms: 1000ms;
+  --p-beat-4-ms: 2000ms;
+  --p-beat-8-ms: 4000ms;
 
   /* Type. Geist + Geist Mono are loaded in index.html; Instrument Serif is
-     the display face. Fallback chain keeps it usable if Google Fonts
-     hiccups. */
+     the design default. Fallback chain keeps it usable if Google Fonts
+     hiccups. The Tweaks panel can override --p-serif at runtime to swap
+     between the four loaded display faces (Instrument Serif, DM Serif
+     Display, Cormorant Garamond, Newsreader). */
   --p-sans: 'Geist', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   --p-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
   --p-serif: 'Instrument Serif', 'Times New Roman', Georgia, serif;
+}
+
+/* Light theme — toggled by the Tweaks panel via data-theme="light" on
+   the root element. Only the color tokens flip; accent + type are
+   shared with dark and modulated separately. Mirrors PILOT_LIGHT from
+   design/pilot.jsx lines 43-55. */
+:root[data-theme='light'] {
+  --p-bg: #f4efe2;
+  --p-surface: #fbf7eb;
+  --p-surface-hi: #ffffff;
+  --p-border: rgba(36, 28, 14, 0.10);
+  --p-border-strong: rgba(36, 28, 14, 0.20);
+  --p-fg: #1c1812;
+  --p-fg-dim: #4a4337;
+  /* Light theme muted tiers — inverted direction (darker = more muted on
+     light bg). Slight bump from the original design's values for the
+     same readability reason as the dark theme. */
+  --p-muted: #6e6859;
+  --p-muted-deep: #9a9388;
+  --p-live: #4d8a39;
+  --p-live-dim: rgba(77, 138, 57, 0.16);
 }
 
 /* Page reset — minimal. */
@@ -159,7 +195,7 @@ body {
   opacity: 0.55;
 }
 .pilot-btn-glow {
-  animation: pilotBtnGlow 1.6s ease-in-out infinite;
+  animation: pilotBtnGlow var(--p-beat-4-ms) ease-in-out infinite;
 }
 .pilot-btn-kbd {
   font: 500 10px/1 var(--p-mono);

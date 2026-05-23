@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from deckpilot.core.actions import ActionPlan
+from deckpilot.core.agent import AgentSchedule
 
 from . import llm, regex
 from .errors import ParseError  # re-exported for callers
@@ -33,18 +34,24 @@ def parse(
     mode: str = "auto",
     library: "LibraryReader | None" = None,
     deck_state: "MixxxState | None" = None,
-) -> ActionPlan:
+) -> "ActionPlan | AgentSchedule":
     """
-    Parse natural-language text into an ActionPlan.
+    Parse natural-language text into either an ActionPlan (single-shot)
+    or an AgentSchedule (autonomous goal with triggers; D-021).
 
     mode:
         "auto"  — regex first, fall back to LLM (default)
-        "regex" — regex only; raises ParseError on no match
+        "regex" — regex only; raises ParseError on no match (regex never
+                  produces schedules — only the LLM can)
         "llm"   — skip regex; go straight to the LLM
 
     `library` and `deck_state` are runtime context forwarded to the LLM
     when it's invoked (regex doesn't need them). Without them, library-
     aware actions like LoadTrack will be declined.
+
+    Callers check `isinstance(result, AgentSchedule)` to route schedules
+    to the agent runtime; ActionPlan responses go through the normal
+    /execute path.
     """
     if mode not in {"auto", "regex", "llm"}:
         raise ValueError(f"unknown parser mode: {mode!r}")

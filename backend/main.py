@@ -24,6 +24,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .routes import agent as agent_routes
+from .routes import artwork as artwork_routes
 from .routes import execute as execute_routes
 from .routes import parse as parse_routes
 from .routes import parse_stream as parse_stream_routes
@@ -71,6 +73,8 @@ app.include_router(execute_routes.router)
 app.include_router(state_routes.router)
 app.include_router(undo_routes.router)
 app.include_router(reset_routes.router)
+app.include_router(artwork_routes.router)
+app.include_router(agent_routes.router)
 
 
 @app.get("/")
@@ -85,5 +89,9 @@ def root():
             "/state",
             "/undo",
             "/reset",
+            "/artwork/{track_id}",
+            "/agent/start",
+            "/agent/cancel",
+            "/agent/state",
         ],
     }

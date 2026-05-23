@@ -7,6 +7,7 @@ Wire format (must match the mapping):
       status 0x80 (note_off)         = paused
       (Mixxx may send either form for "off"; we treat both as paused.)
   - CC 0x30 / 0x31    → deck 1 / deck 2 BPM, scaled BPM_MIN..BPM_MAX → 0..127.
+  - CC 0x32 / 0x33    → deck 1 / deck 2 playhead position, scaled 0..1 → 0..127.
 
 Threading note: python-rtmidi delivers messages on its own callback
 thread. We guard state mutation with a Lock so the dashboard can read
@@ -26,9 +27,10 @@ import rtmidi
 BPM_MIN = 60.0
 BPM_MAX = 200.0
 
-# Must match the <output> bindings + JS sendBpm CCs.
+# Must match the <output> bindings + JS sendBpm / sendPosition CCs.
 PLAY_STATE_NOTE = {0x10: 1, 0x11: 2}   # note → deck number
 BPM_CC = {0x30: 1, 0x31: 2}            # cc   → deck number
+POSITION_CC = {0x32: 1, 0x33: 2}       # cc   → deck number
 
 DEFAULT_PORT_NAME = "IAC Driver Bus 1"
 
@@ -38,6 +40,10 @@ class DeckState:
     """Snapshot of one deck's state as inferred from Mixxx feedback."""
     playing: bool = False
     bpm: float = 0.0  # 0.0 = unknown / no track loaded yet
+    # Playhead position, 0.0 (start) to 1.0 (end). Defaults to 0.0
+    # which is also "no track loaded" since position only fires once
+    # a track is on the deck. Resolution is ~1/128 (CC scaling).
+    position: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -180,6 +186,18 @@ class MixxxFeedback:
                 # rounded BPM moved meaningfully (>= 0.1 BPM).
                 if abs(prev.bpm - bpm) >= 0.1:
                     self._decks[deck] = replace(prev, bpm=bpm)
+                    changed = True
+
+        elif kind == 0xB0 and d1 in POSITION_CC:
+            deck = POSITION_CC[d1]
+            position = d2 / 127.0
+            with self._lock:
+                prev = self._decks[deck]
+                # CC steps are ~0.78% apart; only re-render when a real
+                # step occurred. The JS side already throttles on CC
+                # equality but this guards against future changes there.
+                if abs(prev.position - position) >= 0.005:
+                    self._decks[deck] = replace(prev, position=position)
                     changed = True
 
         if changed and self._on_change is not None:

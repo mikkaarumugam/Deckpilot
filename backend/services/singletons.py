@@ -41,6 +41,10 @@ _executor: Executor | None = None
 _feedback: "MixxxFeedback | None" = None
 _feedback_init_attempted = False
 
+# AgentRuntime singleton — at most one schedule active per process.
+# Created lazily once both Executor + Feedback are available.
+_agent_runtime = None
+
 
 def get_library() -> "LibraryReader | None":
     """LibraryReader is read-only — safe to keep across requests."""
@@ -122,6 +126,30 @@ def get_feedback() -> "MixxxFeedback | None":
     except Exception:
         _feedback = None
     return _feedback
+
+
+def get_agent_runtime():
+    """AgentRuntime singleton — holds at most one active AgentSchedule
+    + a background poll task. Returns None if either the executor or
+    feedback couldn't initialise (no MIDI / no Mixxx → no agent loop)."""
+    global _agent_runtime
+    if _agent_runtime is not None:
+        return _agent_runtime
+    executor = get_executor()
+    if executor is None:
+        return None
+
+    # Lazy import to avoid a circular dependency on bootup
+    # (agent_runtime imports MixxxState which lives in deckpilot, fine,
+    # but we still want this to be cheap when no one calls /agent/*).
+    from .agent_runtime import AgentRuntime
+
+    def _snap():
+        fb = get_feedback()
+        return fb.snapshot() if fb is not None else None
+
+    _agent_runtime = AgentRuntime(executor=executor, feedback_snapshot=_snap)
+    return _agent_runtime
 
 
 def stop_feedback() -> None:

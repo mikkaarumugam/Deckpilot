@@ -18,12 +18,17 @@
 
 import { useState } from 'react';
 
+import { AgentQueue } from './components/AgentQueue';
 import { CommandCard } from './components/CommandCard';
 import { DeckCard } from './components/DeckCard';
 import { HistoryItem } from './components/HistoryItem';
 import { Chip } from './components/Chip';
+import { TweaksPanel } from './components/TweaksPanel';
+import { useAgentState } from './hooks/useAgentState';
+import { useBpmSync } from './hooks/useBpmSync';
 import { useDeckState } from './hooks/useDeckState';
 import { usePilotFlow } from './hooks/usePilotFlow';
+import { useTweaks } from './hooks/useTweaks';
 
 const PRESET_CHIPS = [
   { label: 'play deck 1', kbd: '1' },
@@ -38,7 +43,11 @@ const MOCK_QUEUE: { n: number; text: string; parsed: string }[] = [];
 export function Pilot() {
   const flow = usePilotFlow();
   const stateSnapshot = useDeckState();
+  const tweaksApi = useTweaks();
+  const agentState = useAgentState();
+  useBpmSync(stateSnapshot);
   const [historyCleared, setHistoryCleared] = useState(false);
+  const [tweaksOpen, setTweaksOpen] = useState(false);
 
   const decks = stateSnapshot?.decks ?? [
     { n: 1 as const, status: 'cued' as const, bpm: 0, track: null, progress: { t: '—', total: '—', pct: 0 } },
@@ -98,7 +107,7 @@ export function Pilot() {
             <rect x="9.5" y="6" width="3" height="13" rx="1" fill="var(--p-accent)" />
             <rect x="16" y="3" width="3" height="16" rx="1" fill="var(--p-fg)" opacity="0.4" />
           </svg>
-          <span style={{ font: '500 15px/1 var(--p-sans)', letterSpacing: '-0.01em' }}>DeckPilot</span>
+          <span style={{ font: '500 18px/1 var(--p-sans)', letterSpacing: '-0.01em' }}>DeckPilot</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <div
@@ -106,7 +115,7 @@ export function Pilot() {
               display: 'flex',
               alignItems: 'center',
               gap: 7,
-              font: '500 11px/1 var(--p-mono)',
+              font: '500 12px/1 var(--p-mono)',
               color: stateSnapshot ? 'var(--p-muted)' : 'var(--p-muted-deep)',
               letterSpacing: '0.06em',
             }}
@@ -118,7 +127,7 @@ export function Pilot() {
                 borderRadius: 99,
                 background: stateSnapshot ? 'var(--p-live)' : 'var(--p-muted)',
                 boxShadow: stateSnapshot ? '0 0 8px var(--p-live)' : 'none',
-                animation: stateSnapshot ? 'pilotPulse 2s ease-in-out infinite' : 'none',
+                animation: stateSnapshot ? 'pilotPulse var(--p-beat-4-ms) ease-in-out infinite' : 'none',
               }}
             />
             <span>{stateSnapshot ? 'connected' : 'connecting…'}</span>
@@ -126,8 +135,11 @@ export function Pilot() {
         </div>
       </div>
 
-      {/* Scrollable content */}
+      {/* Scrollable content. Inner div clamps width + centers — keeps
+          the app from sprawling on wide screens (boiler-room intimate
+          framing instead of dashboard sprawl). */}
       <div style={{ flex: 1, padding: '32px 28px 24px', overflow: 'auto', position: 'relative' }}>
+       <div style={{ maxWidth: 880, margin: '0 auto' }}>
         <CommandCard
           phase={flow.phase}
           text={flow.text}
@@ -143,11 +155,17 @@ export function Pilot() {
           onSubmit={flow.onSubmit}
         />
 
+        {/* Agent queue — only renders when the AgentRuntime backend has
+            an active schedule. The polling hook keeps the panel in sync. */}
+        {agentState?.active && (
+          <AgentQueue state={agentState} decks={decks} />
+        )}
+
         {/* Try chips */}
         <div style={{ marginBottom: 28 }}>
           <div
             style={{
-              font: '500 10px/1 var(--p-mono)',
+              font: '500 11px/1 var(--p-mono)',
               color: 'var(--p-muted)',
               letterSpacing: '0.18em',
               marginBottom: 12,
@@ -177,7 +195,7 @@ export function Pilot() {
           >
             <div
               style={{
-                font: '500 10px/1 var(--p-mono)',
+                font: '500 11px/1 var(--p-mono)',
                 color: 'var(--p-muted)',
                 letterSpacing: '0.18em',
                 textTransform: 'uppercase',
@@ -194,6 +212,7 @@ export function Pilot() {
               <DeckCard
                 key={d.n}
                 n={d.n}
+                trackId={d.track?.id}
                 track={d.track?.title ?? '(no track)'}
                 artist={d.track?.artist ?? '—'}
                 bpm={d.bpm > 0 ? d.bpm : 0}
@@ -210,7 +229,7 @@ export function Pilot() {
           <div style={{ marginBottom: 28 }}>
             <div
               style={{
-                font: '500 10px/1 var(--p-mono)',
+                font: '500 11px/1 var(--p-mono)',
                 color: 'var(--p-muted)',
                 letterSpacing: '0.18em',
                 marginBottom: 12,
@@ -233,7 +252,7 @@ export function Pilot() {
                     borderRadius: 10,
                   }}
                 >
-                  <span style={{ font: '500 10px/1 var(--p-mono)', color: 'var(--p-muted-deep)', width: 14 }}>
+                  <span style={{ font: '500 11px/1 var(--p-mono)', color: 'var(--p-muted-deep)', width: 14 }}>
                     {q.n}
                   </span>
                   <span
@@ -264,7 +283,7 @@ export function Pilot() {
           >
             <div
               style={{
-                font: '500 10px/1 var(--p-mono)',
+                font: '500 11px/1 var(--p-mono)',
                 color: 'var(--p-muted)',
                 letterSpacing: '0.18em',
                 textTransform: 'uppercase',
@@ -302,6 +321,7 @@ export function Pilot() {
             )}
           </div>
         </div>
+       </div>
       </div>
 
       {/* Footer */}
@@ -312,7 +332,7 @@ export function Pilot() {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          font: '400 11px/1 var(--p-mono)',
+          font: '400 12.5px/1 var(--p-mono)',
           color: 'var(--p-muted-deep)',
         }}
       >
@@ -324,8 +344,21 @@ export function Pilot() {
           <span style={{ cursor: 'pointer', color: 'var(--p-muted)' }} onClick={flow.onReset}>
             Reset Mixxx
           </span>
+          <span
+            style={{
+              cursor: 'pointer',
+              color: tweaksOpen ? 'var(--p-accent)' : 'var(--p-muted)',
+            }}
+            onClick={() => setTweaksOpen((o) => !o)}
+          >
+            ✱ Tweaks
+          </span>
         </div>
       </div>
+
+      {tweaksOpen && (
+        <TweaksPanel api={tweaksApi} onClose={() => setTweaksOpen(false)} />
+      )}
     </div>
   );
 }

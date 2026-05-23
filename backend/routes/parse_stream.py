@@ -32,11 +32,12 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
 from deckpilot.core.actions import ActionPlan, LoadTrack
+from deckpilot.core.agent import AgentSchedule
 from deckpilot.core.parser.llm_stream import stream_parse_llm
 
 from ..models import ParseRequest, ParseResponse, SuggestionPayload, TrackPayload
-from ..routes.parse import _build_response, action_to_dict
-from ..services.signatures import render_action
+from ..routes.parse import _build_response, action_to_dict, schedule_to_payloads
+from ..services.signatures import affects_label, render_action, summary_signature
 from ..services.singletons import get_feedback, get_gui_adapter, get_library
 
 router = APIRouter()
@@ -102,6 +103,29 @@ async def parse_stream(req: ParseRequest) -> StreamingResponse:
                 continue
 
             if kind == "complete":
+                # Branch on schedule vs plan — see D-021. Schedule
+                # responses skip the suggestion-extraction step (which
+                # was about lone LoadTrack actions) since schedules
+                # are inherently multi-stage and execute autonomously.
+                if "schedule" in event:
+                    schedule: AgentSchedule = event["schedule"]
+                    all_actions = [
+                        s.action
+                        for step in schedule.steps
+                        for s in step.plan.steps
+                    ]
+                    schedule_response = ParseResponse(
+                        text=req.text,
+                        parsed=summary_signature(all_actions) or "(agent schedule)",
+                        conf=95,
+                        affects=affects_label(all_actions),
+                        source="llm",
+                        plan=[],
+                        schedule=schedule_to_payloads(schedule),
+                    )
+                    yield _sse("complete", {"response": schedule_response.model_dump()})
+                    continue
+
                 plan: ActionPlan = event["plan"]
                 response: ParseResponse = _build_response(
                     req.text, plan, source="llm", library=library

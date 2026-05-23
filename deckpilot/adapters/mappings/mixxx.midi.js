@@ -32,10 +32,28 @@ var BPM_MIN = 60.0;
 var BPM_MAX = 200.0;
 var BPM_CC = { "[Channel1]": 0x30, "[Channel2]": 0x31 };
 
+// --- Playhead position output ----------------------------------------------
+//
+// `playposition` is a continuous control from 0.0 (start of track) to 1.0
+// (end). Mixxx fires the callback at ~audio-frame rate while a track is
+// playing — way faster than we need. We scale to 7-bit CC (128 values) and
+// suppress re-sends so the wire only carries actual position changes.
+//
+// At 128 CC values for a 4-minute track, granularity is ~2s per CC step.
+// The frontend interpolates via a CSS transition so the bar fills smoothly
+// between updates.
+//
+// Wire format (Mixxx → Python listener):
+//   - CC 0x32 on status 0xB0 = deck 1 position
+//   - CC 0x33 on status 0xB0 = deck 2 position
+//   - Value 0..127 scaled linearly from 0.0..1.0
+var POSITION_CC = { "[Channel1]": 0x32, "[Channel2]": 0x33 };
+
 // Suppress re-sends when the scaled BPM didn't actually change — Mixxx fires
 // the callback on every beatgrid tick which would spam the wire. We keep the
-// last CC value sent per deck and skip duplicates.
+// last CC value sent per deck and skip duplicates. Same trick for position.
 DeckPilot._lastBpmCc = { "[Channel1]": -1, "[Channel2]": -1 };
+DeckPilot._lastPositionCc = { "[Channel1]": -1, "[Channel2]": -1 };
 DeckPilot._connections = [];
 
 DeckPilot._sendBpm = function(group, bpm) {
@@ -47,6 +65,16 @@ DeckPilot._sendBpm = function(group, bpm) {
     if (ccValue === DeckPilot._lastBpmCc[group]) return;
     DeckPilot._lastBpmCc[group] = ccValue;
     midi.sendShortMsg(0xB0, BPM_CC[group], ccValue);
+};
+
+DeckPilot._sendPosition = function(group, pos) {
+    // pos is 0.0..1.0; clamp + scale to 7-bit CC.
+    if (pos === undefined || pos === null) return;
+    var clamped = Math.max(0, Math.min(1, pos));
+    var ccValue = Math.round(clamped * 127);
+    if (ccValue === DeckPilot._lastPositionCc[group]) return;
+    DeckPilot._lastPositionCc[group] = ccValue;
+    midi.sendShortMsg(0xB0, POSITION_CC[group], ccValue);
 };
 
 // Required Mixxx lifecycle hooks. On init we subscribe to each deck's BPM
@@ -61,12 +89,17 @@ DeckPilot.init = function(id, debug) {
     // breaking the library lookup. file_bpm is 0 for un-analysed tracks,
     // which is honest: we genuinely don't know.
     ["[Channel1]", "[Channel2]"].forEach(function(group) {
-        var conn = engine.makeConnection(group, "file_bpm", function(value) {
+        var bpmConn = engine.makeConnection(group, "file_bpm", function(value) {
             DeckPilot._sendBpm(group, value);
         });
         // engine.makeConnection returns null if the control doesn't exist;
         // guard so a typo or Mixxx-version skew doesn't crash init.
-        if (conn) DeckPilot._connections.push(conn);
+        if (bpmConn) DeckPilot._connections.push(bpmConn);
+
+        var posConn = engine.makeConnection(group, "playposition", function(value) {
+            DeckPilot._sendPosition(group, value);
+        });
+        if (posConn) DeckPilot._connections.push(posConn);
     });
 };
 
@@ -91,6 +124,9 @@ DeckPilot._broadcastState = function() {
 
         DeckPilot._lastBpmCc[group] = -1;
         DeckPilot._sendBpm(group, engine.getValue(group, "file_bpm"));
+
+        DeckPilot._lastPositionCc[group] = -1;
+        DeckPilot._sendPosition(group, engine.getValue(group, "playposition"));
     });
 };
 

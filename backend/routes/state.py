@@ -30,6 +30,16 @@ router = APIRouter()
 _BPM_MATCH_TOLERANCE = 0.6
 
 
+def _format_mmss(seconds: float) -> str:
+    """Format a duration in seconds as `m:ss` (e.g. 0:32, 4:01).
+    Returns `—` for negatives or unknowns so the UI hides it."""
+    if seconds <= 0:
+        return "—"
+    minutes = int(seconds // 60)
+    secs = int(seconds % 60)
+    return f"{minutes}:{secs:02d}"
+
+
 @router.get("/state", response_model=StateResponse)
 def state() -> StateResponse:
     feedback = get_feedback()
@@ -49,6 +59,7 @@ def state() -> StateResponse:
     for n in (1, 2):
         d = snap.deck(n)
         track_payload: TrackPayload | None = None
+        track_duration = 0.0  # seconds; from library if we got a unique match
         if library is not None and d.bpm > 0:
             candidates = library.find_by_bpm(
                 d.bpm - _BPM_MATCH_TOLERANCE,
@@ -56,6 +67,7 @@ def state() -> StateResponse:
             )
             if len(candidates) == 1:
                 t = candidates[0]
+                track_duration = t.duration
                 track_payload = TrackPayload(
                     id=t.id,
                     artist=t.artist,
@@ -65,15 +77,30 @@ def state() -> StateResponse:
                     genre=t.genre,
                 )
 
+        # Compose progress from the MIDI position read-back. When we know
+        # the track's duration (resolved via BPM lookup) we can also render
+        # m:ss timestamps; otherwise just the percentage for the bar.
+        if track_duration > 0:
+            elapsed = d.position * track_duration
+            progress = ProgressPayload(
+                t=_format_mmss(elapsed),
+                total=_format_mmss(track_duration),
+                pct=d.position * 100.0,
+            )
+        elif d.position > 0:
+            progress = ProgressPayload(
+                t="—", total="—", pct=d.position * 100.0,
+            )
+        else:
+            progress = ProgressPayload()
+
         decks.append(
             DeckStatePayload(
                 n=n,  # type: ignore[arg-type]
                 status="playing" if d.playing else "paused",
                 bpm=d.bpm,
                 track=track_payload,
-                # Playhead read-back isn't shipped (Thread 4 / agent layer).
-                # Progress stays at the defaults until that lands.
-                progress=ProgressPayload(),
+                progress=progress,
             )
         )
         bpms.append(d.bpm)

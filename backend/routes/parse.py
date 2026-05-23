@@ -22,6 +22,7 @@ from fastapi import APIRouter
 
 from deckpilot.adapters.midi import LoadTrackSuggestion
 from deckpilot.core.actions import ActionPlan, DJAction, LoadTrack
+from deckpilot.core.agent import AgentSchedule, DeckPosition, Immediate
 from deckpilot.core.parser import parse as facade_parse
 from deckpilot.core.parser.errors import ParseError
 from deckpilot.core.parser.regex import parse as regex_parse
@@ -30,8 +31,10 @@ from ..models import (
     ParseRequest,
     ParseResponse,
     PlanStepPayload,
+    ScheduledPlanPayload,
     SuggestionPayload,
     TrackPayload,
+    TriggerPayload,
 )
 from ..services.signatures import affects_label, render_action, summary_signature
 from ..services.singletons import get_feedback, get_gui_adapter, get_library
@@ -87,6 +90,32 @@ def plan_to_payloads(plan: ActionPlan) -> list[PlanStepPayload]:
     return payloads
 
 
+def schedule_to_payloads(schedule: AgentSchedule) -> list[ScheduledPlanPayload]:
+    """AgentSchedule → list of ScheduledPlanPayload for the wire response.
+    Mirror of plan_to_payloads but wraps each plan inside a trigger +
+    label envelope. The frontend's AgentQueue consumes this verbatim."""
+    out: list[ScheduledPlanPayload] = []
+    for step in schedule.steps:
+        if isinstance(step.trigger, Immediate):
+            trig = TriggerPayload(type="immediate")
+        elif isinstance(step.trigger, DeckPosition):
+            trig = TriggerPayload(
+                type="deck_position",
+                deck=step.trigger.deck,
+                at=step.trigger.at,
+            )
+        else:
+            raise TypeError(f"unknown trigger: {step.trigger!r}")
+        out.append(
+            ScheduledPlanPayload(
+                trigger=trig,
+                plan=plan_to_payloads(step.plan),
+                label=step.label,
+            )
+        )
+    return out
+
+
 @router.post("/parse", response_model=ParseResponse)
 async def parse(req: ParseRequest) -> ParseResponse:
     library = get_library()
@@ -114,7 +143,7 @@ async def parse(req: ParseRequest) -> ParseResponse:
     # Fall through to the LLM. Wrap the blocking subprocess call so
     # FastAPI's event loop stays responsive.
     try:
-        plan = await asyncio.to_thread(
+        result = await asyncio.to_thread(
             facade_parse, req.text, library=library, deck_state=deck_state, mode="llm"
         )
     except ParseError as exc:
@@ -127,6 +156,23 @@ async def parse(req: ParseRequest) -> ParseResponse:
             plan=[],
             error=str(exc),
         )
+
+    # Schedule branch (D-021) — goal-style prompts get the agent shape
+    # instead of a plain plan. The frontend routes schedules to
+    # /agent/start instead of /execute.
+    if isinstance(result, AgentSchedule):
+        all_actions = [s.action for step in result.steps for s in step.plan.steps]
+        return ParseResponse(
+            text=req.text,
+            parsed=summary_signature(all_actions) or "(agent schedule)",
+            conf=95,
+            affects=affects_label(all_actions),
+            source="llm",
+            plan=[],
+            schedule=schedule_to_payloads(result),
+        )
+
+    plan = result  # type: ActionPlan
 
     # Special case: LLM picked a LoadTrack — surface a suggestion card
     # alongside the plan. Pre-D-019 we dropped the whole plan and forced

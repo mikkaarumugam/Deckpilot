@@ -10,7 +10,11 @@
  * become a relative path.
  */
 
-const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? 'http://localhost:8000';
+/** Base URL for the FastAPI backend. Exported because some components
+ *  (DeckCard's artwork <img src>) build URLs directly without going
+ *  through the typed `api.*` helpers. */
+export const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? 'http://localhost:8000';
+const BASE = API_BASE;
 
 // ── Wire types — mirror backend/models.py one-to-one ─────────────────────
 
@@ -63,6 +67,22 @@ export interface SuggestionPayload {
   auto_loadable: boolean;
 }
 
+/** One trigger from an AgentSchedule. `deck` and `at` are populated
+ *  only when type === 'deck_position'. See deckpilot/core/agent.py. */
+export interface TriggerPayload {
+  type: 'immediate' | 'deck_position';
+  deck: number | null;
+  at: number | null;
+}
+
+/** One scheduled step inside an AgentSchedule — a trigger + the plan
+ *  it fires + a one-line UI label. */
+export interface ScheduledPlanPayload {
+  trigger: TriggerPayload;
+  plan: PlanStepPayload[];
+  label: string;
+}
+
 export interface ParseResponse {
   text: string;
   parsed: string;
@@ -71,6 +91,10 @@ export interface ParseResponse {
   source: 'regex' | 'llm';
   plan: PlanStepPayload[];
   suggestion: SuggestionPayload | null;
+  /** Populated when the LLM emitted a goal-style autonomous schedule
+   *  (D-021). The frontend routes these to /agent/start instead of
+   *  /execute. */
+  schedule: ScheduledPlanPayload[] | null;
   error: string | null;
 }
 
@@ -85,6 +109,31 @@ export interface UndoResponse {
   success: boolean;
   inverted_plan: PlanStepPayload[] | null;
   error: string | null;
+}
+
+// ── Agent (D-021) ───────────────────────────────────────────────────────
+
+export interface AgentStartRequest {
+  schedule: ScheduledPlanPayload[];
+}
+
+export interface AgentSimpleResponse {
+  success: boolean;
+  error: string | null;
+}
+
+export interface AgentStepStatus {
+  label: string;
+  trigger_kind: 'immediate' | 'deck_position';
+  trigger_deck: number | null;
+  trigger_at: number | null;
+  status: 'done' | 'running' | 'pending';
+}
+
+export interface AgentStateResponse {
+  active: boolean;
+  started_at_unix: number | null;
+  steps: AgentStepStatus[];
 }
 
 // ── HTTP helpers ─────────────────────────────────────────────────────────
@@ -231,5 +280,22 @@ export const api = {
 
   reset(signal?: AbortSignal): Promise<UndoResponse> {
     return postJson<UndoResponse>('/reset', {}, signal);
+  },
+
+  // ── Agent layer (D-021) ─────────────────────────────────────────────
+
+  agentStart(
+    schedule: ScheduledPlanPayload[],
+    signal?: AbortSignal,
+  ): Promise<AgentSimpleResponse> {
+    return postJson<AgentSimpleResponse>('/agent/start', { schedule }, signal);
+  },
+
+  agentCancel(signal?: AbortSignal): Promise<AgentSimpleResponse> {
+    return postJson<AgentSimpleResponse>('/agent/cancel', {}, signal);
+  },
+
+  agentState(signal?: AbortSignal): Promise<AgentStateResponse> {
+    return getJson<AgentStateResponse>('/agent/state', signal);
   },
 };
