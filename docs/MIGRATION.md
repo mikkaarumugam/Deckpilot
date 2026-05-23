@@ -67,26 +67,30 @@ running the backend without sending commands is free.
 
 Update each `[ ]` to `[x]` as items complete. Commit at the end of each phase.
 
-### Phase 0 — Setup (30 min)
+### Phase 0 — Setup (30 min) ✅ done at `3cabfe5`
 - [x] Kill any running Streamlit process
 - [x] Create branch `feature/react-frontend`
 - [x] Rename design drop `frontend ui/` → `design/`
-- [ ] Write this MIGRATION.md
-- [ ] Write DECISIONS.md § D-018 superseding D-014
-- [ ] Add migration notice to top of CLAUDE.md
-- [ ] Commit Phase 0 docs
+- [x] Write this MIGRATION.md
+- [x] Write DECISIONS.md § D-018 superseding D-014
+- [x] Add migration notice to top of CLAUDE.md
+- [x] Commit Phase 0 docs (`3cabfe5`)
 
-### Phase 1 — Vite + design tokens (1h)
-- [ ] `npm create vite@latest frontend -- --template react-ts`
-- [ ] Edit `frontend/index.html`: add Google Fonts links for Geist, Geist Mono,
+### Phase 1 — Vite + design tokens (1h) ✅
+- [x] `npm create vite@latest frontend -- --template react-ts` (Vite 8, React 19, TS 6)
+- [x] Edit `frontend/index.html`: add Google Fonts links for Geist, Geist Mono,
       Instrument Serif, DM Serif Display, Cormorant Garamond, Newsreader
-- [ ] Create `frontend/src/styles/theme.css` with the `PILOT_DARK` / `PILOT_LIGHT`
-      CSS vars from `design/pilot.jsx` lines 29-71
-- [ ] Move all the keyframes (`pilotPulse`, `pilotBlink`, `pilotFadeIn`,
-      `pilotGlow`, `pilotStepBar`, `pilotNodePulse`, `pilotBtnGlow`) into
-      `theme.css`
-- [ ] Set up `App.tsx` that wraps the future `<Pilot>` with theme CSS vars
-- [ ] `npm run dev` works → empty React app renders the warm dark surface
+- [x] Create `frontend/src/styles/theme.css` with the `PILOT_DARK` CSS vars from
+      `design/pilot.jsx` lines 29-41 + accent computed via `color-mix()`. Light
+      theme deferred — fixed at dark for day 1 per D-018 non-goals.
+- [x] Move all 7 keyframes into `theme.css`. Plus the 5 reusable button/chip
+      classes (pilot-chip, pilot-btn-primary/glow/kbd, pilot-btn-secondary,
+      pilot-icon-btn, pilot-deploy)
+- [x] `App.tsx` is a Phase-1 sanity card that renders the warm dark surface,
+      coral accent button, Instrument Serif "DeckPilot" headline, and Geist
+      Mono code chip — verifies every token resolves
+- [x] `npm run dev` boots clean (port 5173, 173ms ready time)
+- [x] `npm run build` passes TS + bundles 192KB JS / 4KB CSS
 - [ ] Commit: `feat(frontend): Vite + TS scaffold + design tokens`
 
 ### Phase 2 — Component port (3-4h)

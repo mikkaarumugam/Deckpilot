@@ -1,0 +1,222 @@
+/* DeckPilot — theme tokens + keyframes + reusable classes.
+   Lifted from design/pilot.jsx (PILOT_DARK + buildPilotVars + the <style>
+   block at lines ~690-848). The values are the design's source of truth.
+
+   We default to the dark theme + coral accent. The (deferred) tweaks panel
+   would swap these at runtime by rewriting CSS vars on a wrapper.
+
+   Naming convention: --p-* lives under "pilot" prefix to keep app-level
+   tokens isolated from anything Vite/React might inject. */
+
+:root {
+  /* Dark theme (default). To switch: replace this block with the light values
+     from design/pilot.jsx lines 43-55, or wrap the app in a class and
+     scope a light-mode override. */
+  --p-bg: #0c0b09;
+  --p-surface: #16140f;
+  --p-surface-hi: #1d1a14;
+  --p-border: rgba(255, 236, 200, 0.07);
+  --p-border-strong: rgba(255, 236, 200, 0.14);
+  --p-fg: #f1ebe0;
+  --p-fg-dim: #bdb6a8;
+  --p-muted: #7a7468;
+  --p-muted-deep: #534e44;
+  --p-live: #9ec98a;
+  --p-live-dim: rgba(158, 201, 138, 0.18);
+
+  /* Accent — coral, the design's default. To re-tint: change --p-accent and
+     the three derived tokens will follow via color-mix(). */
+  --p-accent: #f08760;
+  --p-accent-dim: color-mix(in srgb, #f08760 16%, transparent);
+  --p-accent-edge: color-mix(in srgb, #f08760 38%, transparent);
+  --p-accent-ink: color-mix(in srgb, #f08760 22%, #0a0805 86%);
+
+  /* Type. Geist + Geist Mono are loaded in index.html; Instrument Serif is
+     the display face. Fallback chain keeps it usable if Google Fonts
+     hiccups. */
+  --p-sans: 'Geist', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --p-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --p-serif: 'Instrument Serif', 'Times New Roman', Georgia, serif;
+}
+
+/* Page reset — minimal. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--p-bg);
+  color: var(--p-fg);
+  font: 400 14px/1.5 var(--p-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Keyframes from design/pilot.jsx lines 690-720. */
+@keyframes pilotPulse {
+  0%, 100% { opacity: 0.45; transform: scale(0.85); }
+  15% { opacity: 1; transform: scale(1.15); }
+  40%, 60% { opacity: 0.6; transform: scale(0.95); }
+}
+@keyframes pilotBlink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+@keyframes pilotFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes pilotGlow {
+  0%, 100% { box-shadow: 0 0 0 1px var(--p-border-strong), 0 0 40px -10px var(--p-accent-dim); }
+  50% { box-shadow: 0 0 0 1px var(--p-accent-edge), 0 0 60px -10px var(--p-accent-dim); }
+}
+@keyframes pilotStepBar {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+@keyframes pilotNodePulse {
+  0%, 100% { box-shadow: 0 0 0 4px var(--p-accent-dim); }
+  50% { box-shadow: 0 0 0 7px var(--p-accent-dim); }
+}
+@keyframes pilotBtnGlow {
+  0%, 100% { box-shadow: 0 0 0 0 var(--p-accent-edge); }
+  50% { box-shadow: 0 0 0 4px var(--p-accent-edge); }
+}
+
+/* Reusable interactive primitives. Names match the original design's classes
+   so the upcoming component port can use className= directly. */
+
+.pilot-chip {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  background: var(--p-surface);
+  border: 1px solid var(--p-border);
+  border-radius: 99px;
+  font: 400 12.5px/1 var(--p-sans);
+  color: var(--p-fg-dim);
+  transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.15s;
+}
+.pilot-chip:hover {
+  background: var(--p-surface-hi);
+  color: var(--p-fg);
+  border-color: var(--p-border-strong);
+}
+.pilot-chip:active {
+  transform: scale(0.97);
+  background: var(--p-accent-dim);
+  border-color: var(--p-accent-edge);
+  color: var(--p-fg);
+}
+.pilot-chip-kbd {
+  font: 500 10px/1 var(--p-mono);
+  color: var(--p-muted-deep);
+  border: 1px solid var(--p-border);
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+
+.pilot-btn-primary {
+  all: unset;
+  cursor: pointer;
+  padding: 8px 16px;
+  background: var(--p-accent);
+  color: var(--p-accent-ink);
+  border-radius: 8px;
+  font: 500 13px/1 var(--p-sans);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: filter 0.15s, transform 0.1s, box-shadow 0.2s;
+}
+.pilot-btn-primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.pilot-btn-primary:active:not(:disabled) {
+  transform: scale(0.97);
+  filter: brightness(0.95);
+}
+.pilot-btn-primary:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.pilot-btn-glow {
+  animation: pilotBtnGlow 1.6s ease-in-out infinite;
+}
+.pilot-btn-kbd {
+  font: 500 10px/1 var(--p-mono);
+  opacity: 0.6;
+}
+
+.pilot-btn-secondary {
+  all: unset;
+  cursor: pointer;
+  padding: 8px 16px;
+  border: 1px solid var(--p-border-strong);
+  color: var(--p-fg);
+  border-radius: 8px;
+  font: 500 13px/1 var(--p-sans);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: background 0.15s, transform 0.1s, border-color 0.15s;
+}
+.pilot-btn-secondary:hover {
+  background: var(--p-surface-hi);
+  border-color: var(--p-accent-edge);
+}
+.pilot-btn-secondary:active {
+  transform: scale(0.97);
+}
+
+.pilot-icon-btn {
+  all: unset;
+  cursor: pointer;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--p-muted);
+  border: 1px solid var(--p-border);
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+.pilot-icon-btn:hover {
+  color: var(--p-fg);
+  background: var(--p-surface-hi);
+  border-color: var(--p-border-strong);
+}
+.pilot-icon-btn:active {
+  background: var(--p-accent-dim);
+  color: var(--p-accent);
+}
+
+.pilot-deploy {
+  all: unset;
+  cursor: pointer;
+  padding: 7px 14px;
+  border: 1px solid var(--p-border-strong);
+  border-radius: 8px;
+  font: 500 12px/1 var(--p-sans);
+  color: var(--p-fg);
+  transition: background 0.15s, border-color 0.15s;
+}
+.pilot-deploy:hover {
+  background: var(--p-surface-hi);
+  border-color: var(--p-accent-edge);
+}
