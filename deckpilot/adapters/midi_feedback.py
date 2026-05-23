@@ -29,6 +29,10 @@ BPM_MAX = 200.0
 
 # Must match the <output> bindings + JS sendBpm / sendPosition CCs.
 PLAY_STATE_NOTE = {0x10: 1, 0x11: 2}   # note → deck number
+# Beat ticks — JS sends one note_on per beat on the rising edge of
+# `beat_active`. Used by the agent's after_beats trigger; we just
+# increment a counter on receive.
+BEAT_NOTE = {0x12: 1, 0x13: 2}         # note → deck number
 BPM_CC = {0x30: 1, 0x31: 2}            # cc   → deck number
 POSITION_CC = {0x32: 1, 0x33: 2}       # cc   → deck number
 # CC 0x38/0x39 carries the active loop size verbatim (0 = no loop, else
@@ -52,6 +56,14 @@ class DeckState:
     # in mixxx.midi.js. Used by the regex parser to make "stop loop"
     # fire the matching toggle instead of always guessing 8.
     loop_beats: int = 0
+    # Monotonic beat counter, incremented once per beat tick from Mixxx
+    # (rising edge of `beat_active`). Never wraps — Python int. The
+    # agent's after_beats trigger snapshots this when a step becomes
+    # pending and fires when current - baseline >= count. Resets are
+    # implicit: track loads cause a brief pause in ticks but the counter
+    # keeps going; the runtime's baseline-snapshot model handles all of
+    # this uniformly.
+    beat_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -184,6 +196,16 @@ class MixxxFeedback:
                 if prev.playing != playing:
                     self._decks[deck] = replace(prev, playing=playing)
                     changed = True
+
+        elif kind == 0x90 and d1 in BEAT_NOTE and d2 > 0:
+            # One note_on per beat (JS only sends on the rising edge of
+            # beat_active). Increment unconditionally — every tick is a
+            # real beat, no de-dup needed here.
+            deck = BEAT_NOTE[d1]
+            with self._lock:
+                prev = self._decks[deck]
+                self._decks[deck] = replace(prev, beat_count=prev.beat_count + 1)
+                changed = True
 
         elif kind == 0xB0 and d1 in BPM_CC:
             deck = BPM_CC[d1]

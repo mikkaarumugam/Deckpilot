@@ -67,6 +67,36 @@ var POSITION_CC = { "[Channel1]": 0x32, "[Channel2]": 0x33 };
 var LOOP_SIZE_CC = { "[Channel1]": 0x38, "[Channel2]": 0x39 };
 var LOOP_SIZES = [1, 2, 4, 8, 16, 32];
 
+// --- Beat tick output ------------------------------------------------------
+//
+// Lets the Tier-3 agent layer fire on "in N beats, do Y" triggers. Mixxx
+// exposes `beat_active` per channel — a 0/1 flag that pulses to 1 briefly
+// (~20ms) at each beat. We subscribe, watch the rising edge, and send ONE
+// note_on per beat. The Python side just increments a counter on receive,
+// no scaling / no wrap-around to worry about.
+//
+// Wire format (Mixxx → Python listener):
+//   - note 0x12 on status 0x90, velocity 0x7F = deck 1 beat tick
+//   - note 0x13 on status 0x90, velocity 0x7F = deck 2 beat tick
+//
+// Adjacent to play-state notes 0x10/0x11; same band so wire-sniffing is
+// easy.
+var BEAT_NOTE = { "[Channel1]": 0x12, "[Channel2]": 0x13 };
+
+// Rising-edge tracker. `beat_active` callback fires for both the 0→1 and
+// 1→0 transitions; only the first one is a beat. Without this we'd emit
+// two ticks per beat and the agent would fire half as many beats late
+// as it should.
+DeckPilot._lastBeatActive = { "[Channel1]": 0, "[Channel2]": 0 };
+
+DeckPilot._sendBeatTick = function(group, value) {
+    var prev = DeckPilot._lastBeatActive[group];
+    DeckPilot._lastBeatActive[group] = value > 0 ? 1 : 0;
+    if (prev === 0 && value > 0) {
+        midi.sendShortMsg(0x90, BEAT_NOTE[group], 0x7F);
+    }
+};
+
 // Suppress re-sends when the scaled BPM didn't actually change — Mixxx fires
 // the callback on every beatgrid tick which would spam the wire. We keep the
 // last CC value sent per deck and skip duplicates. Same trick for position.
@@ -146,6 +176,12 @@ DeckPilot.init = function(id, debug) {
             });
             if (conn) DeckPilot._connections.push(conn);
         });
+
+        // Beat ticks for the Tier-3 agent layer's after_beats trigger.
+        var beatConn = engine.makeConnection(group, "beat_active", function(value) {
+            DeckPilot._sendBeatTick(group, value);
+        });
+        if (beatConn) DeckPilot._connections.push(beatConn);
     });
 };
 
