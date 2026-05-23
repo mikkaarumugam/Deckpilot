@@ -16,7 +16,7 @@
  * in the footer is wired up; clear history is local-state only.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { AgentQueue } from './components/AgentQueue';
 import { CommandCard } from './components/CommandCard';
@@ -36,10 +36,6 @@ const PRESET_CHIPS = [
   { label: 'bass swap into deck 2 over 4 seconds', kbd: '3' },
 ] as const;
 
-// Queue stays mocked for day-1 (D-018 non-goal). Removed when Phase 4+ adds
-// real queue execution.
-const MOCK_QUEUE: { n: number; text: string; parsed: string }[] = [];
-
 export function Pilot() {
   const flow = usePilotFlow();
   const stateSnapshot = useDeckState();
@@ -48,6 +44,14 @@ export function Pilot() {
   useBpmSync(stateSnapshot);
   const [historyCleared, setHistoryCleared] = useState(false);
   const [tweaksOpen, setTweaksOpen] = useState(false);
+
+  // Push agent-active into the flow hook so its queue effect knows
+  // when to defer the next queued command. The hook can't pull this
+  // itself without dragging in useAgentState (and the polling lifecycle
+  // gets noisy across re-renders); cleaner to wire it in here.
+  useEffect(() => {
+    flow.setAgentActive(agentState?.active ?? false);
+  }, [agentState?.active, flow]);
 
   const decks = stateSnapshot?.decks ?? [
     { n: 1 as const, status: 'cued' as const, bpm: 0, track: null, progress: { t: '—', total: '—', pct: 0 } },
@@ -153,6 +157,7 @@ export function Pilot() {
           autoLoadCountdownMs={flow.autoLoadCountdownMs}
           onCancelAutoLoad={flow.onCancelAutoLoad}
           onSubmit={flow.onSubmit}
+          onQueue={flow.onQueue}
         />
 
         {/* Agent queue — only renders when the AgentRuntime backend has
@@ -224,8 +229,10 @@ export function Pilot() {
           </div>
         </div>
 
-        {/* Queue — mocked for day-1 */}
-        {MOCK_QUEUE.length > 0 && (
+        {/* Queue — pending commands waiting for the current run to
+            finish. The hook auto-pops the front when the system goes
+            idle. Click × to cancel an entry without firing it. */}
+        {flow.queue.length > 0 && (
           <div style={{ marginBottom: 28 }}>
             <div
               style={{
@@ -236,12 +243,12 @@ export function Pilot() {
                 textTransform: 'uppercase',
               }}
             >
-              Queue · {MOCK_QUEUE.length} pending
+              Queue · {flow.queue.length} pending
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {MOCK_QUEUE.map((q) => (
+              {flow.queue.map((q, i) => (
                 <div
-                  key={q.n}
+                  key={q.id}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -253,18 +260,36 @@ export function Pilot() {
                   }}
                 >
                   <span style={{ font: '500 11px/1 var(--p-mono)', color: 'var(--p-muted-deep)', width: 14 }}>
-                    {q.n}
+                    {String(i + 1).padStart(2, '0')}
                   </span>
                   <span
                     style={{
                       font: 'italic 400 14.5px/1.2 var(--p-serif)',
                       color: 'var(--p-fg)',
                       flex: 1,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
                     }}
                   >
-                    {q.text}
+                    {q.prompt}
                   </span>
                   <span style={{ font: '500 11px/1 var(--p-mono)', color: 'var(--p-muted)' }}>{q.parsed}</span>
+                  <button
+                    type="button"
+                    onClick={() => flow.onCancelQueueEntry(q.id)}
+                    title="Remove from queue"
+                    style={{
+                      all: 'unset',
+                      cursor: 'pointer',
+                      padding: '4px 8px',
+                      font: '500 14px/1 var(--p-mono)',
+                      color: 'var(--p-muted)',
+                      borderRadius: 4,
+                    }}
+                  >
+                    ×
+                  </button>
                 </div>
               ))}
             </div>

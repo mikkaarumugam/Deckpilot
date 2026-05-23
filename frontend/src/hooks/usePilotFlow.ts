@@ -54,6 +54,17 @@ const REGEX_DEBOUNCE_MS = 150;
  *  enough not to feel sluggish. See D-019. */
 const AUTO_LOAD_COUNTDOWN_MS = 1500;
 
+/** One pending entry in the command queue. We store the full
+ *  ParseResponse so we can re-fire it as either a plan or a schedule
+ *  without re-parsing the text. */
+export interface QueueEntry {
+  /** Stable id for keying + cancel-by-id. Just an incrementing counter. */
+  id: number;
+  prompt: string;
+  parsed: string;
+  response: ParseResponse;
+}
+
 export interface PilotFlowApi {
   phase: Phase;
   text: string;
@@ -70,6 +81,22 @@ export interface PilotFlowApi {
    *  - If a plan is ready → run it.
    *  - If no plan + text has content → fire LLM parse. */
   onSubmit: () => void;
+  /** Queue the currently-parsed result for later. Auto-fires when
+   *  the currently-running plan / schedule finishes (idle state).
+   *  No-op when there's nothing parsed to queue. */
+  onQueue: () => void;
+  /** Pending queue items, in fire order. UI renders this in the
+   *  sidebar / under the command card. */
+  queue: QueueEntry[];
+  /** Remove a specific queue entry (e.g. user wants to cancel a
+   *  pending action). */
+  onCancelQueueEntry: (id: number) => void;
+  /** Tell the queue effect whether a backend-driven AgentSchedule
+   *  is still active. The phase enum doesn't reflect agent state
+   *  (the schedule runs detached after agentStart), so Pilot.tsx
+   *  pushes this in from useAgentState. Without it, queued items
+   *  would fire prematurely while the agent is still ticking. */
+  setAgentActive: (active: boolean) => void;
   /** Cancel the in-flight auto-load countdown. Clears the suggestion
    *  + plan so the user can re-type. No-op if no countdown is active. */
   onCancelAutoLoad: () => void;
@@ -100,6 +127,14 @@ export function usePilotFlow(): PilotFlowApi {
   const stepTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoLoadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [autoLoadPending, setAutoLoadPending] = useState(false);
+
+  const [queue, setQueue] = useState<QueueEntry[]>([]);
+  const queueIdRef = useRef(0);
+  // Tracked from outside (Pilot.tsx feeds in useAgentState.active). The
+  // hook can't watch agent state directly without circular imports —
+  // pushing it in keeps the queue logic colocated with the rest of the
+  // execution machinery.
+  const [agentActive, setAgentActive] = useState(false);
 
   const cancelAutoLoadTimer = () => {
     if (autoLoadTimerRef.current) {
@@ -403,10 +438,13 @@ export function usePilotFlow(): PilotFlowApi {
           setPhase('ready');
           return;
         }
-        // Schedule is running on the backend. Phase stays at 'running'
-        // to dim the input area; useAgentState polling updates the
-        // AgentQueue UI. The user sees "done" when they cancel or all
-        // steps complete (polling reflects active=false).
+        // Schedule is running on the backend. Drop back to 'ready' so
+        // the Run button stays clickable (user can re-fire the same
+        // schedule, or edit the text). The AgentQueue panel below
+        // shows the actual live status — this card doesn't need to
+        // pretend it knows. Previously we set 'done' here which
+        // visually said "complete" while the schedule was still
+        // counting beats; misleading.
         setHistory((h) => [
           {
             when: 'just now',
@@ -417,7 +455,7 @@ export function usePilotFlow(): PilotFlowApi {
           },
           ...h.slice(0, 9),
         ]);
-        setPhase('done');
+        setPhase('ready');
       })
       .catch((err) => {
         if ((err as Error).name === 'AbortError') return;
@@ -449,6 +487,81 @@ export function usePilotFlow(): PilotFlowApi {
       void runLlmParse();
     }
   }, [phase, parseResult, suggestion, text]);
+
+  // ── Queue (Cmd+Enter / Queue button) ──────────────────────────────────
+  //
+  // The user clicks Queue (or Cmd+Enter) → snapshot the current parse
+  // into the pending queue. An effect below auto-fires the front of the
+  // queue whenever the system goes idle (no running plan, no active
+  // agent schedule, no auto-load countdown). Multiple items can be
+  // queued back-to-back — they fire in order.
+  //
+  // Why this shape rather than firing immediately when idle: gives the
+  // user a visible pending list they can inspect/cancel before each
+  // item fires, and the idle-trigger covers both cases (already-idle
+  // → instant fire, busy → defer).
+
+  const onQueue = useCallback(() => {
+    if (!parseResult) return;
+    if (suggestion) return; // can't queue suggestions
+    const hasWork =
+      (parseResult.plan && parseResult.plan.length > 0) ||
+      (parseResult.schedule && parseResult.schedule.length > 0);
+    if (!hasWork) return;
+
+    queueIdRef.current += 1;
+    const entry: QueueEntry = {
+      id: queueIdRef.current,
+      prompt: parseResult.text,
+      parsed: parseResult.parsed,
+      response: parseResult,
+    };
+    setQueue((q) => [...q, entry]);
+
+    // Clear the current parse so the user can type the next idea
+    // without the queued one ghosting in the card. The queued entry
+    // owns its ParseResponse — losing parseResult here doesn't lose
+    // the queued work.
+    setParseResult(null);
+    setExecuted(-1);
+    setText_('');
+    setPhase('typing');
+    setRegexMissed(false);
+  }, [parseResult, suggestion]);
+
+  const onCancelQueueEntry = useCallback((id: number) => {
+    setQueue((q) => q.filter((e) => e.id !== id));
+  }, []);
+
+  // Auto-fire the front of the queue whenever the system is idle.
+  // "Idle" = not parsing, not running a plan, no active agent schedule,
+  // no auto-load countdown in flight. The dependency array is the full
+  // set of "could-be-busy" signals — when any of them flips false and
+  // queue is non-empty, we pop and fire.
+  useEffect(() => {
+    if (queue.length === 0) return;
+    if (phase === 'parsing' || phase === 'running') return;
+    if (agentActive) return;
+    if (autoLoadPending) return;
+
+    const [next, ...rest] = queue;
+    setQueue(rest);
+
+    // Restore the queued ParseResponse as the active one so the
+    // command card visualises what's about to fire. Phase flips into
+    // the right execution path inside runSchedule / runPlan.
+    setParseResult(next.response);
+
+    if (next.response.schedule && next.response.schedule.length > 0) {
+      runSchedule(next.response);
+    } else if (next.response.plan.length > 0) {
+      runPlan(next.response);
+    }
+    // runSchedule / runPlan aren't in the deps because they're
+    // recreated each render and would re-fire the effect. Captured
+    // closures are correct for the moment the queue advances.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queue, phase, agentActive, autoLoadPending]);
 
   // ── Reset Mixxx ──────────────────────────────────────────────────────
 
@@ -501,6 +614,10 @@ export function usePilotFlow(): PilotFlowApi {
     autoLoadPending,
     autoLoadCountdownMs: AUTO_LOAD_COUNTDOWN_MS,
     onSubmit,
+    onQueue,
+    queue,
+    onCancelQueueEntry,
+    setAgentActive,
     onCancelAutoLoad,
     onUndoEntry,
     onReset,

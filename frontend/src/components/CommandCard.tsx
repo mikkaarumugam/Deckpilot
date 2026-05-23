@@ -95,6 +95,13 @@ export function CommandCard({
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault();
+      // Cmd+Enter (macOS) / Ctrl+Enter (everywhere else) → queue for
+      // later instead of running now. Falls through to onSubmit if
+      // onQueue isn't wired so the input never feels dead.
+      if ((e.metaKey || e.ctrlKey) && onQueue) {
+        onQueue();
+        return;
+      }
       onSubmit();
     }
   };
@@ -616,6 +623,9 @@ function describeTriggerInline(step: ScheduledPlanPayload): string {
   if (t.type === 'immediate') return 'now';
   if (t.type === 'deck_position' && t.deck != null && t.at != null) {
     return `deck ${t.deck} @ ${Math.round(t.at * 100)}%`;
+  }
+  if (t.type === 'after_beats' && t.deck != null && t.count != null) {
+    return `+${t.count} beats on deck ${t.deck}`;
   }
   return '—';
 }
