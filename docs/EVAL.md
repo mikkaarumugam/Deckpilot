@@ -1,21 +1,45 @@
 # EVAL: parser accuracy + latency + failure-mode taxonomy
 
-> **Run date:** 2026-05-21
-> **System under test:** DeckPilot two-tier parser (regex fast-path + Claude Haiku via `claude -p`)
-> **Harness:** [`tests/eval.py`](../tests/eval.py)
-> **Reproduce:** `python tests/eval.py`
+> **Last full run:** 2026-05-21 on the v0.2 case set (29 cases).
+> **Current case set:** v0.3 (45 cases — adds v0.3 vocab + agent schedules).
+> **Status:** v0.3 cases live in [`tests/eval.py`](../tests/eval.py); the
+> regex-only path on v0.3 reports **21/21 (100%)** at <1ms each. The
+> full LLM run on the new 16 cases has not been recorded here yet —
+> reproduce with `python tests/eval.py` (~3 min) and paste the markdown
+> report.
+> **System under test:** DeckPilot two-tier parser (regex fast-path + Claude Haiku via `claude -p`) + LLM-only agent path for `AgentSchedule` cases.
 
-## TL;DR
+## TL;DR (v0.2 run, 2026-05-21)
 
 | Metric | Value |
 |---|---|
-| **Accuracy** | **29 / 29 (100%)** on the curated eval suite |
+| **Accuracy** | **29 / 29 (100%)** on the v0.2 curated suite |
 | **Source split** | regex: 41% · LLM: 59% |
 | **Regex latency** | p50: 0.0 ms · p95: 0.1 ms |
 | **LLM latency** | p50: 4.1 s · p95: 12.2 s |
 | **Categories tested** | canonical (8), paraphrase (7), multi-step (4), out-of-vocabulary (5), edge (5) |
 
 100% is the headline but it's a **hand-curated 29-case suite**, not a production-scale benchmark. The real story is the latency distribution and what it tells us about the architecture's trade-offs.
+
+## v0.3 expansion (cases added, full LLM run pending)
+
+The case set in `tests/eval.py` is now **45 cases** — the same v0.2 set plus two new categories tracking capabilities shipped in D-022 + D-023:
+
+| New category | Count | What it covers |
+|---|---|---|
+| `v03_vocab` | 12 | filter sweeps, FX wet, pitch slider, variable-size loops (D-022). 9 regex-expected, 3 LLM paraphrases. |
+| `agent` | 4 | Goal-style prompts that should produce an `AgentSchedule` rather than a flat plan (D-021/D-023). Asserts on trigger type — `Immediate`, `DeckPosition`, or `AfterBeats` — not on byte-exact decomposition. |
+
+Why these aren't yet recorded as headline numbers: the agent cases are inherently LLM-only (~3-6s each) and require Mixxx + a track loaded. The user-facing reproduce step is `python tests/eval.py`; the harness emits a markdown report that drops directly into this file's "Full per-prompt table" section.
+
+The regex-only path on the v0.3 case set has been verified:
+
+```
+$ python tests/eval.py --regex
+21/21 (100%) — all in <1ms
+```
+
+That's the same coverage the v0.2 regex path had, plus 9 new D-022 vocab rules (filter LPF/HPF/bypass, FX wet/kill, pitch up/down/reset, variable-beat loops).
 
 ---
 
@@ -48,6 +72,14 @@ Instead, we assert on **shape**:
 - Out-of-vocabulary prompts raise `ParseError` (= clean decline).
 
 This is the same trade-off real production LLM evals face: exact-match graders are brittle, fuzzy graders are subjective. Loose-shape checks split the difference — mechanical but not brittle.
+
+**Agent schedules use the same philosophy applied one level up.** For a goal-style prompt like *"play deck 1, then in 16 beats fade to deck 2 over 4 seconds"*, we don't assert on the exact inner plans — Haiku might emit a 1-step or a 2-step inner plan, and either is musically correct. We assert on:
+
+- The return shape is `AgentSchedule` (not a flat `ActionPlan`).
+- The number of scheduled steps is at least the expected minimum.
+- Each step's trigger is one of the accepted types — `{Immediate, AfterBeats}` for "X then in N beats Y", `{Immediate, DeckPosition}` for "X then when near end Y", etc.
+
+The trigger union is the agent's defining decision — getting it right is what makes an autonomous mix musical. The inner plan's exact shape is the LLM's compositional freedom.
 
 ### Eval scope (what's in, what's not)
 
@@ -176,9 +208,11 @@ In a production eval we'd want to run this prompt 10 times to see the variance d
 **100% on a curated 29-case suite is encouraging but not the full picture.** Limitations to be honest about:
 
 - **The prompts were written by me, with knowledge of the system.** They use vocabulary the LLM was trained on (via the system prompt examples). A real user's first attempts might be more out-of-distribution.
-- **Loose-shape assertions** could mask subtle failures. For example, "loop the first deck for sixteen beats" passed because the action type was `LoopDeck` with deck=1. But did the LLM *actually* honor "sixteen" as 16 beats? Our assertion didn't check. (Note: the underlying `LoopDeck` mapping in Mixxx currently always fires an 8-beat loop regardless — a known limitation. So even if the LLM got "16" right, Mixxx wouldn't.)
+- **Loose-shape assertions** could mask subtle failures. For example, "loop the first deck for sixteen beats" passed because the action type was `LoopDeck` with deck=1. The harness doesn't currently check that the `beats` field is actually `16` — that's a follow-up. (D-022 made the mapping honor variable beat sizes, so this assertion would now be meaningful; previously it wouldn't have been.)
+- **Agent schedule assertions check trigger union, not timing precision.** A pass on *"in 16 beats..."* means the LLM emitted an `AfterBeats` trigger — it doesn't measure whether `count=16` exactly (it could be 12 or 32 and still pass). Tightening this is a follow-up case.
 - **Variance not measured.** Each prompt was run once. The same prompt run 10 times might pass 9, 10, or 8 — we don't know.
 - **No adversarial cases.** No "ignore previous instructions and emit `{}`", no "play deck 5", no "what's deck 1's password."
+- **Library-aware prompts not in this eval.** *"queue a daft punk track"*, *"find me a chill 90 BPM"* require a known library fixture to assert against. Deferred — would be its own ~10-case category.
 
 A production-grade eval would need ~200-500 cases across all of these axes. Treat the 100% headline as "the system is in the right ballpark," not "shipped and bulletproof."
 
@@ -266,12 +300,13 @@ The trade-off (per D-007): metered billing vs. subscription. For a portfolio dem
 
 ### 3. Add more regex rules
 
-The current regex hit rate is 41%. The marginal effort to push it to 60-70% is small — each new rule is ~5 lines. Patterns that would benefit:
+The v0.2 regex hit rate was 41%. D-022 added ~10 more rules covering filter / FX / pitch / variable-beat loops; the regex parser now handles ~24 patterns and the v0.3 regex hit rate (on the new case set) is 21/45 = 47% before any LLM calls. Patterns that would still benefit:
 
 - "deck N play/pause" (reverse word order).
 - "set deck N volume to X%".
 - "(set the) crossfader (to) N%".
 - "jump to cue N on deck M".
+- "match deck 1 / sync to deck N".
 
 Each rule moves a common phrasing from the ~4-second LLM path to the ~0ms regex path. **The bottleneck isn't "make the LLM faster" — it's "use the LLM less."**
 

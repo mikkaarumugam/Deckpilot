@@ -39,8 +39,17 @@ from deckpilot.core.actions import (
     PlayDeck,
     SetCrossfader,
     SetEQ,
+    SetFilter,
+    SetFx,
+    SetPitch,
     SetVolume,
     Sync,
+)
+from deckpilot.core.agent import (
+    AfterBeats,
+    AgentSchedule,
+    DeckPosition,
+    Immediate,
 )
 from deckpilot.core.parser import parse
 from deckpilot.core.parser import regex as regex_parser
@@ -69,6 +78,12 @@ class Case:
     expected_max_steps: Optional[int] = None
     expected_source: Optional[str] = None        # "regex" | "llm" | None (don't check)
     expected_decline: bool = False               # True = parser should raise ParseError
+    # Agent schedule expectations (D-021/D-023). Setting these implies the
+    # prompt should produce an AgentSchedule rather than a flat ActionPlan;
+    # we assert on the trigger union shape and the count of scheduled steps.
+    expected_schedule: bool = False
+    expected_schedule_min_steps: int = 1
+    expected_trigger_types: tuple = ()           # set of acceptable Trigger types
 
 
 CASES: list[Case] = [
@@ -117,6 +132,65 @@ CASES: list[Case] = [
     Case("stop loop", "edge", LoopDeck, 1, expected_source="regex"),
     Case("turn bass on", "edge", SetEQ, 1),
     Case("cut the highs", "edge", SetEQ, 1, expected_source="regex"),
+
+    # === v0.3 vocabulary (D-022): filter / FX / pitch / variable loops ===
+    # Canonical regex hits — these should be instant. Same coverage pattern
+    # as the canonical category above; separated as its own bucket so the
+    # report shows what fraction of new vocab actually lands on regex
+    # (which is what we'd want for demo latency).
+    Case("low pass deck 1", "v03_vocab", SetFilter, 1, expected_source="regex"),
+    Case("high pass deck 2", "v03_vocab", SetFilter, 2, expected_source="regex"),
+    Case("filter off", "v03_vocab", SetFilter, 1, expected_source="regex"),
+    Case("fx 1 to 50% on deck 1", "v03_vocab", SetFx, 1, expected_source="regex"),
+    Case("kill fx 2 on deck 2", "v03_vocab", SetFx, 2, expected_source="regex"),
+    Case("pitch deck 1 up 4%", "v03_vocab", SetPitch, 1, expected_source="regex"),
+    Case("reset pitch", "v03_vocab", SetPitch, 1, expected_source="regex"),
+    Case("loop deck 1 for 4 beats", "v03_vocab", LoopDeck, 1, expected_source="regex"),
+    Case("loop deck 2 for 32 beats", "v03_vocab", LoopDeck, 2, expected_source="regex"),
+    # Paraphrases — should fall through to LLM. These exercise the prompt's
+    # new vocabulary docs (D-022) more than the regex rules.
+    Case("sweep the filter down on deck 1", "v03_vocab", SetFilter, 1),
+    Case("add some fx to deck 1", "v03_vocab", SetFx, 1),
+    Case("speed deck 1 up a bit", "v03_vocab", SetPitch, 1),
+
+    # === Agent schedules (D-021 + D-023) ===
+    # Goal-style prompts should produce an AgentSchedule, not a flat plan.
+    # Trigger shape is the assertion — Immediate for the kickoff, then
+    # either DeckPosition (near-end) or AfterBeats (musical-time) for the
+    # downstream step. These are inherently LLM-only — the regex parser
+    # never emits schedules.
+    Case(
+        "play deck 1, then in 16 beats fade to deck 2 over 4 seconds",
+        "agent",
+        expected_source="llm",
+        expected_schedule=True,
+        expected_schedule_min_steps=2,
+        expected_trigger_types=(Immediate, AfterBeats),
+    ),
+    Case(
+        "play deck 1, then bass swap into deck 2 when deck 1 is near the end",
+        "agent",
+        expected_source="llm",
+        expected_schedule=True,
+        expected_schedule_min_steps=2,
+        expected_trigger_types=(Immediate, DeckPosition),
+    ),
+    Case(
+        "in 8 beats kill the bass on deck 1",
+        "agent",
+        expected_source="llm",
+        expected_schedule=True,
+        expected_schedule_min_steps=1,
+        expected_trigger_types=(AfterBeats,),
+    ),
+    Case(
+        "play deck 1 then in 32 beats start deck 2",
+        "agent",
+        expected_source="llm",
+        expected_schedule=True,
+        expected_schedule_min_steps=2,
+        expected_trigger_types=(Immediate, AfterBeats),
+    ),
 ]
 
 
@@ -166,6 +240,39 @@ def _run_case(case: Case) -> Result:
                       failure_reason=f"unexpected decline: {err}")
 
     assert actual is not None
+
+    # === Schedule branch (D-021/D-023) ============================
+    # When a case expects an AgentSchedule, the result shape differs:
+    # actual.steps is a list of ScheduledPlan (trigger + inner plan + label),
+    # not TimedAction. We assert on the trigger union here and skip the
+    # action-type / deck checks that only apply to flat plans.
+    if case.expected_schedule:
+        if not isinstance(actual, AgentSchedule):
+            kind = type(actual).__name__
+            return Result(case, False, None, 0, source, latency,
+                          failure_reason=f"expected schedule, got {kind}")
+        n = len(actual.steps)
+        if n < case.expected_schedule_min_steps:
+            return Result(case, False, None, n, source, latency,
+                          failure_reason=f"too few schedule steps: {n} < {case.expected_schedule_min_steps}")
+        if case.expected_trigger_types:
+            # Every scheduled step's trigger must be one of the accepted
+            # types. We're lenient about order (Haiku may permute the
+            # kickoff and the timed step under some phrasings).
+            for i, step in enumerate(actual.steps):
+                if not isinstance(step.trigger, case.expected_trigger_types):
+                    accepted = "/".join(t.__name__ for t in case.expected_trigger_types)
+                    got = type(step.trigger).__name__
+                    return Result(case, False, None, n, source, latency,
+                                  failure_reason=f"schedule step {i} trigger: expected {accepted}, got {got}")
+        return Result(case, True, None, n, source, latency)
+
+    # Schedule returned but case didn't expect one — flag the mismatch
+    # so the eval doesn't silently pass a misclassified prompt.
+    if isinstance(actual, AgentSchedule):
+        return Result(case, False, None, len(actual.steps), source, latency,
+                      failure_reason="parser produced schedule; case expected flat plan")
+
     first = actual.steps[0].action
 
     # Source check (when specified)
