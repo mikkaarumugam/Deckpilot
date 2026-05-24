@@ -39,15 +39,15 @@ The single interesting architectural call: **the LLM never emits raw MIDI.** It 
 
 ## Demo
 
-*(60-90s demo video TK.)*
+📺 **[Watch the 1:37 demo →](docs/demo.mp4)** *(click to download/play)*
 
-Suggested flow:
+Two Daft Punk tracks. Five commands. One AI doing the mixing.
 
-1. `play deck 1` — regex fast-path, instant (⚡ <1ms)
-2. `low pass deck 1` — filter knob sweeps in Mixxx, audible
-3. `find me a chill track around 90 BPM` — suggestion card with the LLM's reasoning *("85 BPM is the lowest in the library — best fit for 'chill'")*. Auto-loads onto deck 2.
-4. `bass swap into deck 2 over 4 seconds` — 6-step plan streams in one-by-one (SSE), then fires autonomously
-5. `play deck 1, then in 16 beats bass swap into deck 2 over 4 seconds` — schedule preview; click Run; the agent counts down beats live and fires the swap autonomously when beat 16 hits
+1. `play deck 1` — *Around The World* drops. Regex fast-path, instant.
+2. `loop deck 1 over 8 beats` — loop holds the chorus, builds tension.
+3. `exit loop` — release.
+4. `echo deck 1 out into deck 2 over 8 seconds` — *Around The World* trails into FX wet as *One More Time* fades in. The LLM picks the FX-led transition because of the verb "echo," not a generic crossfade.
+5. `in 16 beats filter sweep back to deck 1` — agent schedule. DeckPilot counts beats off *One More Time* and autonomously sweeps the filter back to *Around The World* on beat 16. User does nothing for ~7 seconds.
 
 ---
 
@@ -73,7 +73,7 @@ DeckPilot targets **Mixxx** (free, open-source, MIDI-mappable). The adapter patt
 
 ```bash
 # 1. Clone and install
-git clone <this-repo> && cd deckpilot
+git clone https://github.com/mikkaarumugam/Deckpilot.git && cd Deckpilot
 python -m venv .venv && source .venv/bin/activate
 python -m pip install -e .
 
