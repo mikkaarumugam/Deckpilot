@@ -20,7 +20,7 @@ from ..models import (
     StateResponse,
     TrackPayload,
 )
-from ..services.singletons import get_feedback, get_library
+from ..services.singletons import get_feedback, get_gui_adapter, get_library
 
 router = APIRouter()
 
@@ -44,6 +44,7 @@ def _format_mmss(seconds: float) -> str:
 def state() -> StateResponse:
     feedback = get_feedback()
     library = get_library()
+    gui = get_gui_adapter()
 
     if feedback is None:
         return StateResponse(
@@ -65,8 +66,26 @@ def state() -> StateResponse:
                 d.bpm - _BPM_MATCH_TOLERANCE,
                 d.bpm + _BPM_MATCH_TOLERANCE,
             )
+            # Disambiguation strategy:
+            #   1 candidate  → use it (the simple, common path).
+            #   >1 candidates → fall back on the GUI adapter's
+            #                   last_loaded[deck] memory. If the agent
+            #                   loaded this track, that id will be in
+            #                   the candidate set; pick the match.
+            #   0 candidates → leave track_payload null (D-017).
+            picked = None
             if len(candidates) == 1:
-                t = candidates[0]
+                picked = candidates[0]
+            elif len(candidates) > 1 and gui is not None:
+                last_id = gui.last_loaded(n)
+                if last_id is not None:
+                    for c in candidates:
+                        if c.id == last_id:
+                            picked = c
+                            break
+
+            if picked is not None:
+                t = picked
                 track_duration = t.duration
                 track_payload = TrackPayload(
                     id=t.id,

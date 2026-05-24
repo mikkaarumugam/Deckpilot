@@ -62,6 +62,12 @@ class MixxxGuiAdapter:
     next keystroke arrives before Mixxx's UI has processed the previous
     one. Hand-tuned on the user's machine; bump them up if you see
     misfires under load.
+
+    The adapter also keeps a `last_loaded[deck] = track_id` map so the
+    /state route can disambiguate when BPM matching returns multiple
+    library candidates (real failure mode when two tracks sit within
+    ±0.6 BPM of each other — see D-017). The adapter loaded the track,
+    so it knows; /state just has to ask.
     """
 
     # Tunable delays (seconds). Exposed as instance attrs so a test or
@@ -74,9 +80,15 @@ class MixxxGuiAdapter:
     load_settle_delay: float = 0.4     # post-load → deck has the track
     clear_delay: float = 0.2           # post-load → before wiping search
 
+    def __init__(self) -> None:
+        # deck → most-recently-loaded library track id. Stale after a
+        # manual drag-and-drop in Mixxx (the adapter doesn't observe
+        # those), but accurate for any agent-driven or LLM-driven load.
+        self._last_loaded: dict[int, int] = {}
+
     # ── Public API ────────────────────────────────────────────────────
 
-    def load_track(self, deck: int, query: str) -> None:
+    def load_track(self, deck: int, query: str, track_id: int | None = None) -> None:
         """Search Mixxx for `query`, highlight the top result, load to
         `deck`, then clear the search so the library shows everything
         again. Blocks until the whole flow completes.
@@ -96,6 +108,20 @@ class MixxxGuiAdapter:
         time.sleep(self.load_settle_delay)
         self._clear_search()
         time.sleep(self.clear_delay)
+
+        # Remember what we loaded so /state can disambiguate when BPM
+        # matching has multiple candidates. Only set when caller knows
+        # the id — keeps backward-compat with any callers that don't.
+        if track_id is not None:
+            self._last_loaded[deck] = track_id
+
+    def last_loaded(self, deck: int) -> int | None:
+        """Return the track id this adapter most recently loaded onto
+        `deck`, or None if it hasn't loaded anything there yet. Used by
+        the /state route as a tie-breaker when BPM-based library
+        matching returns >1 candidate (see D-017 + the deck-image bug
+        report dated 2026-05-24)."""
+        return self._last_loaded.get(deck)
 
     # ── Internal helpers ──────────────────────────────────────────────
 

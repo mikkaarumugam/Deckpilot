@@ -287,8 +287,10 @@ class MidiAdapter(Adapter):
 
         # Fire the GUI load. Blocks until Mixxx has loaded the track
         # so any subsequent step in the plan (e.g. PlayDeck) fires at
-        # the right moment without manual scheduling.
-        self._gui.load_track(deck=action.deck, query=query)
+        # the right moment without manual scheduling. Pass track_id so
+        # the GUI adapter can remember the deck→id mapping for the
+        # /state route's tie-breaker when BPM matching is ambiguous.
+        self._gui.load_track(deck=action.deck, query=query, track_id=track.id)
 
     # --- low-level MIDI helpers ---
 
