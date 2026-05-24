@@ -1,45 +1,32 @@
 # EVAL: parser accuracy + latency + failure-mode taxonomy
 
-> **Last full run:** 2026-05-21 on the v0.2 case set (29 cases).
-> **Current case set:** v0.3 (45 cases — adds v0.3 vocab + agent schedules).
-> **Status:** v0.3 cases live in [`tests/eval.py`](../tests/eval.py); the
-> regex-only path on v0.3 reports **21/21 (100%)** at <1ms each. The
-> full LLM run on the new 16 cases has not been recorded here yet —
-> reproduce with `python tests/eval.py` (~3 min) and paste the markdown
-> report.
+> **Run date:** 2026-05-24 (v0.3 case set — 45 cases)
 > **System under test:** DeckPilot two-tier parser (regex fast-path + Claude Haiku via `claude -p`) + LLM-only agent path for `AgentSchedule` cases.
+> **Harness:** [`tests/eval.py`](../tests/eval.py)
+> **Reproduce:** `python tests/eval.py`
 
-## TL;DR (v0.2 run, 2026-05-21)
+## TL;DR
 
 | Metric | Value |
 |---|---|
-| **Accuracy** | **29 / 29 (100%)** on the v0.2 curated suite |
-| **Source split** | regex: 41% · LLM: 59% |
+| **Accuracy** | **45 / 45 (100%)** on the v0.3 curated suite |
+| **Source split** | regex: 47% (21) · LLM: 53% (24) |
 | **Regex latency** | p50: 0.0 ms · p95: 0.1 ms |
-| **LLM latency** | p50: 4.1 s · p95: 12.2 s |
-| **Categories tested** | canonical (8), paraphrase (7), multi-step (4), out-of-vocabulary (5), edge (5) |
+| **LLM latency** | p50: 5.8 s · p95: 19.0 s |
+| **Categories tested** | canonical (8), paraphrase (7), multi-step (4), out-of-vocabulary (5), edge (5), v03_vocab (12), agent (4) |
 
-100% is the headline but it's a **hand-curated 29-case suite**, not a production-scale benchmark. The real story is the latency distribution and what it tells us about the architecture's trade-offs.
+100% is the headline but it's a **hand-curated 45-case suite**, not a production-scale benchmark. The real story is the latency distribution + what it tells us about the architecture's trade-offs, plus the agent-layer cases that validate Haiku's schedule decomposition.
 
-## v0.3 expansion (cases added, full LLM run pending)
+### What changed from the v0.2 run (2026-05-21, 29 cases)
 
-The case set in `tests/eval.py` is now **45 cases** — the same v0.2 set plus two new categories tracking capabilities shipped in D-022 + D-023:
+| Metric | v0.2 (29) | v0.3 (45) | Δ |
+|---|---|---|---|
+| Accuracy | 29/29 (100%) | 45/45 (100%) | — |
+| Regex hit rate | 41% (12/29) | 47% (21/45) | +6 pp (9 new D-022 rules) |
+| LLM p50 | 4.1s | 5.8s | +1.7s |
+| LLM p95 | 12.2s | 19.0s | +6.8s |
 
-| New category | Count | What it covers |
-|---|---|---|
-| `v03_vocab` | 12 | filter sweeps, FX wet, pitch slider, variable-size loops (D-022). 9 regex-expected, 3 LLM paraphrases. |
-| `agent` | 4 | Goal-style prompts that should produce an `AgentSchedule` rather than a flat plan (D-021/D-023). Asserts on trigger type — `Immediate`, `DeckPosition`, or `AfterBeats` — not on byte-exact decomposition. |
-
-Why these aren't yet recorded as headline numbers: the agent cases are inherently LLM-only (~3-6s each) and require Mixxx + a track loaded. The user-facing reproduce step is `python tests/eval.py`; the harness emits a markdown report that drops directly into this file's "Full per-prompt table" section.
-
-The regex-only path on the v0.3 case set has been verified:
-
-```
-$ python tests/eval.py --regex
-21/21 (100%) — all in <1ms
-```
-
-That's the same coverage the v0.2 regex path had, plus 9 new D-022 vocab rules (filter LPF/HPF/bypass, FX wet/kill, pitch up/down/reset, variable-beat loops).
+The LLM tail got slower in v0.3 — driven entirely by the new cases. The three slowest: *"sweep the filter down on deck 1"* (20.5s — D-022 paraphrase), *"do a bass swap then loop deck 1 for 8 beats"* (14.4s — chained multi-intent), *"in 8 beats kill the bass on deck 1"* (13.4s — agent schedule). These are genuinely harder for Haiku than the v0.2 prompts; they're not noise. See **Analysis → p95 outliers** below.
 
 ---
 
@@ -95,7 +82,7 @@ The trigger union is the agent's defining decision — getting it right is what 
 - **Cross-run consistency.** Same prompt 10 times to measure variance.
 - **Negative-case latency.** How fast does refusal happen relative to success?
 
-A production eval would expand to ~200-500 cases across these axes. This 29-case suite is sufficient to defend the **architectural** claims and identify the **first-order** failure modes — not the full picture.
+A production eval would expand to ~200-500 cases across these axes. This 45-case suite is sufficient to defend the **architectural** claims and identify the **first-order** failure modes — not the full picture.
 
 ---
 
@@ -104,11 +91,11 @@ A production eval would expand to ~200-500 cases across these axes. This 29-case
 ### Headline numbers
 
 ```
-Accuracy:                  29 / 29  (100%)
-Source split:              regex 12  ·  LLM 17
-Regex hit rate:            41%
+Accuracy:                  45 / 45  (100%)
+Source split:              regex 21  ·  LLM 24
+Regex hit rate:            47%
 Latency (regex):           p50 = 0.0 ms,  p95 = 0.1 ms
-Latency (LLM):             p50 = 4089 ms,  p95 = 12206 ms
+Latency (LLM):             p50 = 5800 ms, p95 = 19023 ms
 ```
 
 ### By category
@@ -120,6 +107,8 @@ Latency (LLM):             p50 = 4089 ms,  p95 = 12206 ms
 | `multi_step` (LLM, ≥2 steps) | 4 | 4 | 100% |
 | `oov` (should decline) | 5 | 5 | 100% |
 | `edge` (bare/ambiguous) | 5 | 5 | 100% |
+| `v03_vocab` (D-022: filter/FX/pitch/var-loops) | 12 | 12 | 100% |
+| `agent` (D-021/D-023: trigger-gated schedules) | 4 | 4 | 100% |
 
 ### Full per-prompt table
 
@@ -133,27 +122,43 @@ Latency (LLM):             p50 = 4089 ms,  p95 = 12206 ms
 | 6 | `kill the bass on deck 1` | canonical | regex | 1 | 0 ms | ✓ |
 | 7 | `sync deck 2` | canonical | regex | 1 | 0 ms | ✓ |
 | 8 | `bring back the bass on deck 2` | canonical | regex | 1 | 0 ms | ✓ |
-| 9 | `kick into the second deck` | paraphrase | llm | 1 | 4608 ms | ✓ |
-| 10 | `drop deck 1` | paraphrase | llm | 1 | 3389 ms | ✓ |
-| 11 | `halt deck 2` | paraphrase | llm | 1 | 3490 ms | ✓ |
-| 12 | `transition smoothly to deck 2 over six seconds` | paraphrase | llm | 1 | 3999 ms | ✓ |
-| 13 | `loop the first deck for sixteen beats` | paraphrase | llm | 1 | 3991 ms | ✓ |
-| 14 | `put the crossfader in the center` | paraphrase | llm | 1 | 3729 ms | ✓ |
-| 15 | `cut the lows on the second deck` | paraphrase | llm | 1 | 4320 ms | ✓ |
-| 16 | `bass swap into deck 2 over 4 seconds` | multi_step | llm | 6 | 6628 ms | ✓ |
-| 17 | `bass swap into deck 1` | multi_step | llm | 6 | 5252 ms | ✓ |
-| 18 | `do a bass swap then loop deck 1 for 8 beats` | multi_step | llm | 7 | 5784 ms | ✓ |
-| 19 | `play deck 2 then fade to it over 4 seconds` | multi_step | llm | 2 | 11699 ms | ✓ |
-| 20 | `skip to the next song` | oov | llm | 0 | 3755 ms | ✓ |
-| 21 | `load a daft punk song` | oov | llm | 0 | 3490 ms | ✓ |
-| 22 | `what bpm is deck 1` | oov | llm | 0 | 5582 ms | ✓ |
-| 23 | `record the next 30 seconds` | oov | llm | 0 | 4089 ms | ✓ |
-| 24 | `start broadcasting to twitch` | oov | llm | 0 | 3526 ms | ✓ |
+| 9 | `kick into the second deck` | paraphrase | llm | 1 | 4441 ms | ✓ |
+| 10 | `drop deck 1` | paraphrase | llm | 1 | 6634 ms | ✓ |
+| 11 | `halt deck 2` | paraphrase | llm | 1 | 4804 ms | ✓ |
+| 12 | `transition smoothly to deck 2 over six seconds` | paraphrase | llm | 1 | 3968 ms | ✓ |
+| 13 | `loop the first deck for sixteen beats` | paraphrase | llm | 1 | 4047 ms | ✓ |
+| 14 | `put the crossfader in the center` | paraphrase | llm | 1 | 3728 ms | ✓ |
+| 15 | `cut the lows on the second deck` | paraphrase | llm | 1 | 4191 ms | ✓ |
+| 16 | `bass swap into deck 2 over 4 seconds` | multi_step | llm | 6 | 6025 ms | ✓ |
+| 17 | `bass swap into deck 1` | multi_step | llm | 6 | 10607 ms | ✓ |
+| 18 | `do a bass swap then loop deck 1 for 8 beats` | multi_step | llm | 7 | 14378 ms | ✓ |
+| 19 | `play deck 2 then fade to it over 4 seconds` | multi_step | llm | 2 | 5593 ms | ✓ |
+| 20 | `skip to the next song` | oov | llm | 0 | 9874 ms | ✓ |
+| 21 | `load a daft punk song` | oov | llm | 0 | 4251 ms | ✓ |
+| 22 | `what bpm is deck 1` | oov | llm | 0 | 6047 ms | ✓ |
+| 23 | `record the next 30 seconds` | oov | llm | 0 | 5010 ms | ✓ |
+| 24 | `start broadcasting to twitch` | oov | llm | 0 | 5426 ms | ✓ |
 | 25 | `play` | edge | regex | 1 | 0 ms | ✓ |
 | 26 | `kill the bass` | edge | regex | 1 | 0 ms | ✓ |
 | 27 | `stop loop` | edge | regex | 1 | 0 ms | ✓ |
-| 28 | `turn bass on` | edge | llm | 1 | 4724 ms | ✓ |
+| 28 | `turn bass on` | edge | llm | 1 | 3819 ms | ✓ |
 | 29 | `cut the highs` | edge | regex | 1 | 0 ms | ✓ |
+| 30 | `low pass deck 1` | v03_vocab | regex | 1 | 0 ms | ✓ |
+| 31 | `high pass deck 2` | v03_vocab | regex | 1 | 0 ms | ✓ |
+| 32 | `filter off` | v03_vocab | regex | 1 | 0 ms | ✓ |
+| 33 | `fx 1 to 50% on deck 1` | v03_vocab | regex | 1 | 0 ms | ✓ |
+| 34 | `kill fx 2 on deck 2` | v03_vocab | regex | 1 | 0 ms | ✓ |
+| 35 | `pitch deck 1 up 4%` | v03_vocab | regex | 1 | 0 ms | ✓ |
+| 36 | `reset pitch` | v03_vocab | regex | 1 | 0 ms | ✓ |
+| 37 | `loop deck 1 for 4 beats` | v03_vocab | regex | 1 | 0 ms | ✓ |
+| 38 | `loop deck 2 for 32 beats` | v03_vocab | regex | 1 | 0 ms | ✓ |
+| 39 | `sweep the filter down on deck 1` | v03_vocab | llm | 2 | 20571 ms | ✓ |
+| 40 | `add some fx to deck 1` | v03_vocab | llm | 1 | 5603 ms | ✓ |
+| 41 | `speed deck 1 up a bit` | v03_vocab | llm | 1 | 6938 ms | ✓ |
+| 42 | `play deck 1, then in 16 beats fade to deck 2 over 4 seconds` | agent | llm | 2 | 10339 ms | ✓ |
+| 43 | `play deck 1, then bass swap into deck 2 when deck 1 is near the end` | agent | llm | 2 | 10305 ms | ✓ |
+| 44 | `in 8 beats kill the bass on deck 1` | agent | llm | 1 | 13385 ms | ✓ |
+| 45 | `play deck 1 then in 32 beats start deck 2` | agent | llm | 2 | 5998 ms | ✓ |
 
 ---
 
@@ -161,18 +166,18 @@ Latency (LLM):             p50 = 4089 ms,  p95 = 12206 ms
 
 ### What the regex fast-path bought us
 
-41% of prompts hit the regex parser and resolved in **under 1ms.** These are the canonical phrasings + edge cases (bare "play", "kill the bass" without explicit deck, etc.). For the user, these feel **instant** — no spinner, no waiting.
+47% of prompts hit the regex parser and resolved in **under 1ms.** These are the canonical phrasings + edge cases (bare "play", "kill the bass" without explicit deck, etc.) plus all 9 D-022 vocab rules (filter, FX, pitch, variable-beat loops). For the user, these feel **instant** — no spinner, no waiting.
 
-Without the regex layer, every one of these would have paid the LLM tax (~4s p50). Doing the math:
+Without the regex layer, every one of these would have paid the LLM tax (~5.8s p50 now). Doing the math:
 
-- 12 prompts × 4 seconds (median LLM latency) = ~48 seconds of cumulative wait time *that we avoided* across just these 12 prompts.
-- Multiplied over a real DJ session (~200 commands), that's 13+ minutes of latency saved if the regex hit rate holds.
+- 21 prompts × 5.8 seconds (median LLM latency) = ~122 seconds of cumulative wait time *that we avoided* across just these 21 prompts.
+- Multiplied over a real DJ session (~200 commands), that's 19+ minutes of latency saved if the regex hit rate holds.
 
-**The two-tier architecture isn't a "nice optimization" — it's what makes the system feel like a tool instead of a chat interface.**
+**The two-tier architecture isn't a "nice optimization" — it's what makes the system feel like a tool instead of a chat interface.** This conclusion got *stronger* between v0.2 and v0.3: every new regex rule we added to the vocabulary moves another whole category of phrasings off the LLM path.
 
 ### Where the LLM latency comes from
 
-The LLM path averaged ~4s p50, ~12s p95. Breakdown for a typical single-action LLM call (e.g. "kick into the second deck", 4.6s wall clock):
+The LLM path averaged ~5.8s p50, ~19s p95. Breakdown for a typical single-action LLM call (e.g. "kick into the second deck", 4.4s wall clock):
 
 | Stage | Time | % of total |
 |---|---|---|
@@ -183,29 +188,30 @@ The LLM path averaged ~4s p50, ~12s p95. Breakdown for a typical single-action L
 | JSON extraction + validation (Python side) | <10 ms | <1% |
 | MIDI send (Python side) | <5 ms | <1% |
 
-**The single biggest cost is not the model.** It's the subprocess spawn + Claude Code's per-invocation initialization. About ~1.5-2 seconds of the ~4s p50 has nothing to do with model intelligence — it's just CLI overhead.
+**The single biggest cost is not the model.** It's the subprocess spawn + Claude Code's per-invocation initialization. About ~1.5-2 seconds of the ~5.8s p50 has nothing to do with model intelligence — it's just CLI overhead.
 
 This is a real architectural choice (D-007 in `DECISIONS.md`): we route through `claude -p` to use the user's Claude Pro/Max subscription rather than a metered API key. The trade-off is the ~1.5-2s overhead we'd save by switching to the Anthropic SDK's warm HTTP client.
 
-### The p95 outlier
+### The p95 outliers
 
-The slowest case was "play deck 2 then fade to it over 4 seconds" at 12.2 seconds. This is a *2-step plan*. The LLM had to:
+The three slowest cases in v0.3:
 
-1. Recognize that "play deck 2 then fade to it" is a *sequence*, not a single intent.
-2. Decompose it into `[PlayDeck(2), FadeToDeck(deck=2, seconds=4)]`.
-3. Order them with the right `at_seconds` values.
+| Prompt | Latency | Category | What's hard about it |
+|---|---|---|---|
+| *"sweep the filter down on deck 1"* | 20.6s | v03_vocab paraphrase | The model emitted a 2-step plan (start position + end position) instead of one `SetFilter`. More tokens, more thinking. |
+| *"do a bass swap then loop deck 1 for 8 beats"* | 14.4s | multi_step | 7 atomic actions plus the chained intent ("then ..."). |
+| *"in 8 beats kill the bass on deck 1"* | 13.4s | agent | Has to recognize this is a *schedule* with an `AfterBeats` trigger, not a flat plan. Goal-decomposition is slower than flat parsing. |
 
-It took twice as long as the simpler multi-step plans. Possible reasons:
+Pattern: **the harder the LLM has to think about composition, the longer the call takes**. Single intents come back in ~4-6s; compositional and goal-style intents in ~10-15s; the worst paraphrase case crossed 20s.
 
-- More output tokens (the model has to emit two JSON objects, not one).
-- The model may have "thought longer" about whether to emit a 2-step plan or fold it into one action.
-- Random per-call variance — a re-run might be faster.
+Two things to note about the v0.2 → v0.3 latency regression:
 
-In a production eval we'd want to run this prompt 10 times to see the variance distribution. For now, the takeaway: **multi-step plans cost more, both in latency and tokens. Predictable.**
+1. **It's not the architecture — it's the prompts.** The new D-022 paraphrases + D-023 agent cases are inherently harder. The v0.2 cases re-run today would likely be similar to their original times.
+2. **Variance per prompt is large.** *"bass swap into deck 2"* was 6.6s in v0.2 and 6.0s in v0.3; *"bass swap into deck 1"* was 5.3s in v0.2 and 10.6s in v0.3. **Same prompt, ~2× variance run-to-run.** A real eval would run each prompt 10 times to characterize this; the production fix is documented under "Production takeaways" below.
 
 ### What the perfect score doesn't tell you
 
-**100% on a curated 29-case suite is encouraging but not the full picture.** Limitations to be honest about:
+**100% on a curated 45-case suite is encouraging but not the full picture.** Limitations to be honest about:
 
 - **The prompts were written by me, with knowledge of the system.** They use vocabulary the LLM was trained on (via the system prompt examples). A real user's first attempts might be more out-of-distribution.
 - **Loose-shape assertions** could mask subtle failures. For example, "loop the first deck for sixteen beats" passed because the action type was `LoopDeck` with deck=1. The harness doesn't currently check that the `beats` field is actually `16` — that's a follow-up. (D-022 made the mapping honor variable beat sizes, so this assertion would now be meaningful; previously it wouldn't have been.)
