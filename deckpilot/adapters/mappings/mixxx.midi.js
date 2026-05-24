@@ -106,11 +106,19 @@ DeckPilot._lastLoopSizeCc = { "[Channel1]": -1, "[Channel2]": -1 };
 DeckPilot._connections = [];
 
 DeckPilot._sendBpm = function(group, bpm) {
-    // BPM = 0 means no track loaded (or pre-analysis). Skip rather than
-    // emitting a misleading 0-CC value.
-    if (!bpm || bpm <= 0) return;
-    var clamped = Math.max(BPM_MIN, Math.min(BPM_MAX, bpm));
-    var ccValue = Math.round((clamped - BPM_MIN) / (BPM_MAX - BPM_MIN) * 127);
+    // CC value 0 is reserved as the "no track / unknown BPM" sentinel
+    // so Python can clear the deck card when a track unloads. Real BPM
+    // values get encoded into CC 1..127 (i.e. one fewer step than
+    // 0..127). The lost precision is ~1 BPM at the extremes — well
+    // below the ±0.6 matching tolerance, so it doesn't affect library
+    // lookups.
+    var ccValue;
+    if (!bpm || bpm <= 0) {
+        ccValue = 0;
+    } else {
+        var clamped = Math.max(BPM_MIN, Math.min(BPM_MAX, bpm));
+        ccValue = Math.max(1, Math.round((clamped - BPM_MIN) / (BPM_MAX - BPM_MIN) * 127));
+    }
     if (ccValue === DeckPilot._lastBpmCc[group]) return;
     DeckPilot._lastBpmCc[group] = ccValue;
     midi.sendShortMsg(0xB0, BPM_CC[group], ccValue);
