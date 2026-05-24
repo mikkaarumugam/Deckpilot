@@ -191,6 +191,16 @@ DeckPilot.init = function(id, debug) {
         });
         if (beatConn) DeckPilot._connections.push(beatConn);
     });
+
+    // Proactively emit current state on init. Otherwise cycling the
+    // Mixxx controller (Preferences → toggle Enabled) re-runs init() →
+    // re-subscribes → but the subscribed values don't refire until they
+    // change, leaving Python with whatever stale state it last saw
+    // before the cycle. Most painful symptom: ejected decks keep
+    // showing the old track on DeckPilot's deck card forever. By
+    // broadcasting state on every init, the cycle becomes the proper
+    // "resync" gesture users expect.
+    DeckPilot._broadcastState();
 };
 
 DeckPilot.shutdown = function() {
