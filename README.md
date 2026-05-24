@@ -39,7 +39,9 @@ The single interesting architectural call: **the LLM never emits raw MIDI.** It 
 
 ## Demo
 
-📺 **[Watch the 1:37 demo →](docs/demo.mp4)** *(click to download/play)*
+https://github.com/user-attachments/assets/4dcd1f69-4b4d-43d0-94e9-b86f40e5d8dc
+
+*Fallback: download [`docs/demo.mp4`](docs/demo.mp4) if the embed doesn't play.*
 
 Two Daft Punk tracks. Five commands. One AI doing the mixing.
 
