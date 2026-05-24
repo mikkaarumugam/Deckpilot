@@ -62,9 +62,15 @@ def state() -> StateResponse:
         track_payload: TrackPayload | None = None
         track_duration = 0.0  # seconds; from library if we got a unique match
         if library is not None and d.bpm > 0:
+            # Pass duration when we have it — narrows from "tracks at
+            # this BPM" to "tracks at this BPM + length" which is
+            # essentially unique. Falls back to BPM-only when duration
+            # is unknown (track just loaded, half of the 14-bit pair
+            # not yet received).
             candidates = library.find_by_bpm(
                 d.bpm - _BPM_MATCH_TOLERANCE,
                 d.bpm + _BPM_MATCH_TOLERANCE,
+                duration=float(d.duration_seconds) if d.duration_seconds > 0 else None,
             )
             # Disambiguation strategy:
             #   1 candidate  → use it (the simple, common path).

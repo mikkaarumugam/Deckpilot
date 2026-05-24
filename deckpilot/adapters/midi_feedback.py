@@ -39,6 +39,12 @@ POSITION_CC = {0x32: 1, 0x33: 2}       # cc   → deck number
 # CC 0x38/0x39 carries the active loop size verbatim (0 = no loop, else
 # beats). One CC per deck — Mixxx only ever has one loop active per channel.
 LOOP_SIZE_CC = {0x38: 1, 0x39: 2}      # cc   → deck number
+# CC 0x3A-0x3D: track duration in seconds, sent as a 14-bit pair (HI+LO).
+# Combined with BPM, makes track identification essentially unique even
+# in dense BPM clusters (120 / 90 / 140 BPM). JS always sends HI first;
+# Python assembles on LO arrival.
+DURATION_HI_CC = {0x3A: 1, 0x3C: 2}    # cc → deck number (high 7 bits)
+DURATION_LO_CC = {0x3B: 1, 0x3D: 2}    # cc → deck number (low 7 bits)
 
 DEFAULT_PORT_NAME = "IAC Driver Bus 1"
 
@@ -73,6 +79,11 @@ class DeckState:
     # keeps going; the runtime's baseline-snapshot model handles all of
     # this uniformly.
     beat_count: int = 0
+    # Loaded track's total duration in seconds, 14-bit precision from
+    # MIDI (max ~16k seconds = 4.5 hours, plenty). Used as a secondary
+    # signal in /state library matching so two tracks at the same BPM
+    # but different lengths get distinguished. 0 = unknown / no track.
+    duration_seconds: int = 0
 
 
 @dataclass(frozen=True)
@@ -116,6 +127,10 @@ class MixxxFeedback:
         self._heartbeat_midi_out: rtmidi.MidiOut | None = None
         self._heartbeat_stop = threading.Event()
         self._heartbeat_thread: threading.Thread | None = None
+        # Half-state for the 14-bit duration assembler. JS sends HI then
+        # LO; we hold the HI byte until the matching LO arrives, then
+        # commit the combined value. Default 0 = "no HI seen yet."
+        self._pending_duration_hi: dict[int, int] = {1: 0, 2: 0}
 
     # ── lifecycle ────────────────────────────────────────────────────
 
@@ -332,6 +347,21 @@ class MixxxFeedback:
                 # equality but this guards against future changes there.
                 if abs(prev.position - position) >= 0.005:
                     self._decks[deck] = replace(prev, position=position)
+                    changed = True
+
+        elif kind == 0xB0 and d1 in DURATION_HI_CC:
+            # Just stash the HI byte; commit happens on LO arrival.
+            deck = DURATION_HI_CC[d1]
+            self._pending_duration_hi[deck] = d2
+
+        elif kind == 0xB0 and d1 in DURATION_LO_CC:
+            deck = DURATION_LO_CC[d1]
+            hi = self._pending_duration_hi.get(deck, 0)
+            duration = (hi << 7) | d2  # 14-bit unsigned, 0..16383 seconds
+            with self._lock:
+                prev = self._decks[deck]
+                if prev.duration_seconds != duration:
+                    self._decks[deck] = replace(prev, duration_seconds=duration)
                     changed = True
 
         elif kind == 0xB0 and d1 in LOOP_SIZE_CC:

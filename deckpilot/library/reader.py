@@ -110,13 +110,33 @@ class LibraryReader:
         """All non-deleted tracks, sorted by artist then title."""
         return self._query()
 
-    def find_by_bpm(self, low: float, high: float) -> list[Track]:
+    def find_by_bpm(
+        self,
+        low: float,
+        high: float,
+        duration: float | None = None,
+        duration_tolerance: float = 2.0,
+    ) -> list[Track]:
         """Tracks whose analysed BPM falls in [low, high]. Skips
-        un-analysed tracks (bpm = 0)."""
-        return self._query(
+        un-analysed tracks (bpm = 0).
+
+        Optional `duration` narrows further by track length (seconds);
+        only tracks within ±`duration_tolerance` are kept. Used by
+        /state to disambiguate when BPM matching alone returns multiple
+        candidates (common in dense BPM zones — 120, 90, 140). 2-second
+        tolerance handles small mismatches between MixxxFeedback's
+        14-bit integer encoding and the library's full-precision float.
+        """
+        results = self._query(
             "library.bpm BETWEEN ? AND ? AND library.bpm > 0",
             (low, high),
         )
+        if duration is not None and duration > 0:
+            results = [
+                t for t in results
+                if abs(t.duration - duration) <= duration_tolerance
+            ]
+        return results
 
     def find_by_artist(self, name: str) -> list[Track]:
         """Case-insensitive substring match against the artist field."""

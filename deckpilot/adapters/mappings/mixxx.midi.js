@@ -103,7 +103,25 @@ DeckPilot._sendBeatTick = function(group, value) {
 DeckPilot._lastBpmCc = { "[Channel1]": -1, "[Channel2]": -1 };
 DeckPilot._lastPositionCc = { "[Channel1]": -1, "[Channel2]": -1 };
 DeckPilot._lastLoopSizeCc = { "[Channel1]": -1, "[Channel2]": -1 };
+DeckPilot._lastDurationSec = { "[Channel1]": -1, "[Channel2]": -1 };
 DeckPilot._connections = [];
+
+// --- Track duration output -------------------------------------------------
+//
+// Combined with BPM, duration is essentially a unique key per track — two
+// different songs rarely share both the same BPM AND the same length. Used
+// by the /state route to disambiguate when BPM-only matching returns
+// multiple library candidates (common in dense BPM zones like 120 / 90 BPM).
+//
+// 14-bit encoding: high 7 bits on CC_HI, low 7 bits on CC_LO. Max value
+// 16383s = 4.55 hours, more than any realistic track. Always send HI
+// before LO so Python's assembler doesn't combine mismatched halves.
+//
+// Wire format:
+//   - CC 0x3A / 0x3C  → deck 1 / deck 2 duration HIGH 7 bits
+//   - CC 0x3B / 0x3D  → deck 1 / deck 2 duration LOW 7 bits
+var DURATION_HI_CC = { "[Channel1]": 0x3A, "[Channel2]": 0x3C };
+var DURATION_LO_CC = { "[Channel1]": 0x3B, "[Channel2]": 0x3D };
 
 DeckPilot._sendBpm = function(group, bpm) {
     // CC value 0 is reserved as the "no track / unknown BPM" sentinel
@@ -122,6 +140,19 @@ DeckPilot._sendBpm = function(group, bpm) {
     if (ccValue === DeckPilot._lastBpmCc[group]) return;
     DeckPilot._lastBpmCc[group] = ccValue;
     midi.sendShortMsg(0xB0, BPM_CC[group], ccValue);
+};
+
+DeckPilot._sendDuration = function(group, durationSec) {
+    var rounded = Math.round(durationSec || 0);
+    if (rounded < 0) rounded = 0;
+    if (rounded > 16383) rounded = 16383;  // 14-bit cap
+    if (rounded === DeckPilot._lastDurationSec[group]) return;
+    DeckPilot._lastDurationSec[group] = rounded;
+    var hi = (rounded >> 7) & 0x7F;
+    var lo = rounded & 0x7F;
+    // Always HI first; Python's assembler waits for LO to commit the pair.
+    midi.sendShortMsg(0xB0, DURATION_HI_CC[group], hi);
+    midi.sendShortMsg(0xB0, DURATION_LO_CC[group], lo);
 };
 
 DeckPilot._sendLoopSize = function(group) {
@@ -190,6 +221,15 @@ DeckPilot.init = function(id, debug) {
             DeckPilot._sendBeatTick(group, value);
         });
         if (beatConn) DeckPilot._connections.push(beatConn);
+
+        // Track duration for BPM-disambiguation in /state matching.
+        // Mixxx fires `duration` on every track load (the callback only
+        // runs when the value actually changes, so paused tracks don't
+        // re-trigger). We emit hi+lo CCs as a 14-bit pair.
+        var durConn = engine.makeConnection(group, "duration", function(value) {
+            DeckPilot._sendDuration(group, value);
+        });
+        if (durConn) DeckPilot._connections.push(durConn);
     });
 
     // Proactively emit current state on init. Otherwise cycling the
@@ -230,6 +270,9 @@ DeckPilot._broadcastState = function() {
 
         DeckPilot._lastLoopSizeCc[group] = -1;
         DeckPilot._sendLoopSize(group);
+
+        DeckPilot._lastDurationSec[group] = -1;
+        DeckPilot._sendDuration(group, engine.getValue(group, "duration"));
     });
 };
 
