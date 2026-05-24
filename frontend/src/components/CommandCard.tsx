@@ -14,6 +14,8 @@
  * - Errors render inline beneath the parsed pill.
  */
 
+import { useEffect, useRef } from 'react';
+
 import {
   type ParseResponse,
   type ScheduledPlanPayload,
@@ -101,8 +103,25 @@ export function CommandCard({
     : parseResult?.parsed ?? (hintReady ? '(press ⏎ to ask AI)' : '(awaiting input)');
   const confValue = parseResult?.conf ?? 0;
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  // Auto-resize the textarea so long commands wrap to a second/third
+  // line instead of getting clipped off the right edge. CSS-only
+  // `field-sizing: content` would also work in modern Chrome/Edge but
+  // the ref-based approach is universally safe.
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [text]);
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter') {
+      // Textarea's default Enter is "newline" — we override to "submit"
+      // because this is a command input, not a doc editor. Shift+Enter
+      // still works the normal way (insert newline) for the rare case
+      // someone wants to manually break a long prompt for readability.
+      if (e.shiftKey) return;
       e.preventDefault();
       // Cmd+Enter (macOS) / Ctrl+Enter (everywhere else) → queue for
       // later instead of running now. Falls through to onSubmit if
@@ -167,13 +186,19 @@ export function CommandCard({
         }}
       >
         <span style={{ color: 'var(--p-accent)' }}>›</span>
-        <input
-          type="text"
+        <textarea
+          ref={inputRef}
           value={text}
           onChange={(e) => onTextChange(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="bass swap into deck 2 over 4 seconds…"
           autoFocus
+          rows={1}
+          // Textarea instead of <input> so long commands wrap to a
+          // second line cleanly. Resize/overflow off — height is
+          // driven by the useEffect that matches scrollHeight as
+          // `text` changes. `flex: 1` makes the textarea take all
+          // remaining width after the `›` prompt indicator.
           style={{
             all: 'unset',
             flex: 1,
@@ -181,6 +206,15 @@ export function CommandCard({
             color: 'inherit',
             letterSpacing: 'inherit',
             caretColor: 'var(--p-accent)',
+            resize: 'none',
+            overflow: 'hidden',
+            // Keep the first line aligned with the `›` prompt; without
+            // verticalAlign top, the textarea baseline drifts when
+            // multi-line.
+            verticalAlign: 'top',
+            // Disable browser-default underline-on-focus + scroll bars.
+            outline: 'none',
+            scrollbarWidth: 'none',
           }}
         />
       </div>
