@@ -133,10 +133,10 @@ export function Pilot() {
             const label =
               status === 'connecting' ? 'connecting…'
               : status === 'connected' ? 'connected'
-              : 'no Mixxx';
+              : 'not connected';
             const dotColor =
               status === 'connected' ? 'var(--p-live)'
-              : status === 'no-mixxx' ? '#f59e0b'  // amber: backend ok, Mixxx not
+              : status === 'no-mixxx' ? '#f59e0b'  // amber: backend ok, adapter not getting feedback
               : 'var(--p-muted)';
             const glow = status === 'connected' ? `0 0 8px ${dotColor}` : 'none';
             const animation = status === 'connected'
