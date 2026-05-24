@@ -215,12 +215,16 @@ body {
   gap: 8px;
   transition: background 0.15s, transform 0.1s, border-color 0.15s;
 }
-.pilot-btn-secondary:hover {
+.pilot-btn-secondary:hover:not(:disabled) {
   background: var(--p-surface-hi);
   border-color: var(--p-accent-edge);
 }
-.pilot-btn-secondary:active {
+.pilot-btn-secondary:active:not(:disabled) {
   transform: scale(0.97);
+}
+.pilot-btn-secondary:disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 
 .pilot-icon-btn {

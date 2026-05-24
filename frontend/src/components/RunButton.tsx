@@ -18,18 +18,31 @@ interface RunButtonProps {
   phase: Phase;
   currentStep: number;
   totalSteps: number;
+  /** True when the input has typed text. In phase='typing' this flips
+   *  the button from disabled to "Ask Haiku" — same behaviour as the
+   *  Enter keyboard handler, which falls through to LLM parse when no
+   *  plan is ready. Without this, Run looked broken on paraphrased
+   *  prompts. */
+  hasText?: boolean;
   onClick?: () => void;
 }
 
-export function RunButton({ phase, currentStep, totalSteps, onClick }: RunButtonProps) {
+export function RunButton({ phase, currentStep, totalSteps, hasText, onClick }: RunButtonProps) {
   let label = 'Run';
   let kbd: string | null = '⏎';
   let disabled = false;
   let extraClass = '';
 
   if (phase === 'typing') {
-    label = 'Run';
-    disabled = true;
+    if (hasText) {
+      // Mirror what Enter does: kick off the LLM parse. Label matches
+      // the pill hint ("press ⏎ to ask Haiku") so the action is clear.
+      label = 'Ask Haiku';
+      extraClass = 'pilot-btn-glow';
+    } else {
+      label = 'Run';
+      disabled = true;
+    }
   } else if (phase === 'parsing') {
     label = 'Drafting…';
     disabled = true;

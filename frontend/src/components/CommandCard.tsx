@@ -213,9 +213,24 @@ export function CommandCard({
           phase={phase}
           currentStep={currentStep}
           totalSteps={totalSteps}
+          hasText={text.trim().length > 0}
           onClick={onSubmit}
         />
-        <button className="pilot-btn-secondary" onClick={onQueue} type="button">
+        <button
+          className="pilot-btn-secondary"
+          onClick={onQueue}
+          type="button"
+          // Queue needs a parsed plan/schedule to stash. Disable visually
+          // when there's nothing to queue (no parse result, or a
+          // suggestion is showing, or the parsed result is empty) so the
+          // button doesn't look clickable while silently no-op'ing.
+          disabled={
+            !parseResult ||
+            !!suggestion ||
+            ((parseResult.plan?.length ?? 0) === 0 &&
+              (parseResult.schedule?.length ?? 0) === 0)
+          }
+        >
           <span>Queue</span>
           <span style={{ font: '500 10px/1 var(--p-mono)', color: 'var(--p-muted)' }}>⌘⏎</span>
         </button>
