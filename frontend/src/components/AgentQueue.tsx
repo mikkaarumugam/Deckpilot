@@ -74,9 +74,15 @@ export function AgentQueue({ state, decks }: AgentQueueProps) {
         </span>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
         {state.steps.map((step, i) => (
-          <AgentRow key={i} n={i + 1} step={step} decks={decks} />
+          <AgentRow
+            key={i}
+            n={i + 1}
+            step={step}
+            decks={decks}
+            last={i === state.steps.length - 1}
+          />
         ))}
       </div>
     </div>
@@ -84,105 +90,120 @@ export function AgentQueue({ state, decks }: AgentQueueProps) {
 }
 
 // ── Per-row rendering ────────────────────────────────────────────────────
+//
+// Mirrors the visual language of components/PlanStep (rail + node + body
+// with monospace fn signature) so the agent queue feels like an extension
+// of the plan timeline, not a different widget. The detail line carries
+// the trigger description — that's the agent's value-add over a plain
+// plan, so it gets prime real estate beneath the fn signature.
 
 function AgentRow({
   n,
   step,
   decks,
+  last,
 }: {
   n: number;
   step: AgentStepStatus;
   decks: DeckStatePayload[];
+  last: boolean;
 }) {
   const isRunning = step.status === 'running';
   const isDone = step.status === 'done';
+  const isPending = step.status === 'pending';
 
   return (
     <div
       style={{
         display: 'flex',
-        alignItems: 'center',
-        gap: 14,
-        padding: '10px 14px',
-        background: isRunning ? 'var(--p-accent-dim)' : 'var(--p-surface)',
-        border: `1px solid ${
-          isRunning ? 'var(--p-accent-edge)' : 'var(--p-border)'
-        }`,
-        borderRadius: 10,
-        opacity: isDone ? 0.45 : 1,
-        transition: 'background 0.2s, border-color 0.2s, opacity 0.2s',
+        gap: 12,
+        position: 'relative',
+        opacity: isDone ? 0.55 : 1,
+        transition: 'opacity 0.3s',
       }}
     >
-      <StatusIcon status={step.status} />
-      <span
-        style={{
-          font: '500 11px/1 var(--p-mono)',
-          color: 'var(--p-muted-deep)',
-          width: 18,
-        }}
-      >
-        {String(n).padStart(2, '0')}
-      </span>
-      <span
-        style={{
-          flex: 1,
-          font: 'italic 400 16px/1.2 var(--p-serif)',
-          color: 'var(--p-fg)',
-          letterSpacing: '-0.005em',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}
-      >
-        {step.label}
-      </span>
-      <TriggerHint step={step} decks={decks} />
-    </div>
-  );
-}
+      {/* Rail + node — same geometry as PlanStep */}
+      <div style={{ position: 'relative', width: 18, flex: '0 0 18px' }}>
+        <span
+          style={{
+            position: 'absolute',
+            top: 3,
+            left: 4,
+            width: 10,
+            height: 10,
+            borderRadius: 99,
+            background: isDone ? 'var(--p-accent)' : 'var(--p-bg)',
+            border: `1.5px solid ${isPending ? 'var(--p-muted-deep)' : 'var(--p-accent)'}`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            transition: 'background 0.25s, border-color 0.25s, box-shadow 0.25s',
+            boxShadow: isRunning ? '0 0 0 4px var(--p-accent-dim)' : 'none',
+            animation: isRunning ? 'pilotNodePulse var(--p-beat-2-ms) ease-in-out infinite' : 'none',
+          }}
+        >
+          {isDone && (
+            <svg width="7" height="7" viewBox="0 0 10 10" fill="none">
+              <path
+                d="M2 5 L4 7 L8 3"
+                stroke="var(--p-accent-ink)"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          )}
+        </span>
+        {!last && (
+          <span
+            style={{
+              position: 'absolute',
+              top: 14,
+              left: 8.25,
+              bottom: -8,
+              width: 1.5,
+              background: isDone ? 'var(--p-accent)' : 'var(--p-border-strong)',
+              opacity: isDone ? 0.55 : 0.6,
+              transition: 'background 0.25s',
+            }}
+          />
+        )}
+      </div>
 
-function StatusIcon({ status }: { status: AgentStepStatus['status'] }) {
-  if (status === 'done') {
-    return (
-      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-        <circle cx="7" cy="7" r="6" fill="var(--p-accent)" />
-        <path
-          d="M3.5 7.5 L6 10 L10.5 4.5"
-          stroke="var(--p-accent-ink)"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    );
-  }
-  if (status === 'running') {
-    return (
-      <span
-        style={{
-          width: 12,
-          height: 12,
-          borderRadius: 99,
-          background: 'var(--p-accent)',
-          // Reuse the BPM-bound pulse so the agent-active dot beats
-          // with the music. Cheap visual coherence.
-          animation: 'pilotPulse var(--p-beat-2-ms) ease-in-out infinite',
-          boxShadow: '0 0 10px var(--p-accent-edge)',
-        }}
-      />
-    );
-  }
-  return (
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-      <circle
-        cx="7"
-        cy="7"
-        r="5.5"
-        stroke="var(--p-muted)"
-        strokeWidth="1.2"
-        fill="none"
-      />
-    </svg>
+      {/* Body */}
+      <div style={{ flex: 1, paddingBottom: last ? 0 : 12, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ font: '500 11.5px/1 var(--p-mono)', color: 'var(--p-muted-deep)' }}>
+            {String(n).padStart(2, '0')}
+          </span>
+          <span
+            style={{
+              font: '500 14px/1.2 var(--p-mono)',
+              color: isPending ? 'var(--p-fg-dim)' : 'var(--p-fg)',
+              transition: 'color 0.25s',
+            }}
+          >
+            {step.signature || step.label}
+          </span>
+          <span style={{ flex: 1 }} />
+          <TriggerHint step={step} decks={decks} />
+        </div>
+        <div
+          style={{
+            marginTop: 4,
+            marginLeft: 22,
+            font: 'italic 400 13px/1.4 var(--p-serif)',
+            color: isPending ? 'var(--p-muted)' : 'var(--p-fg-dim)',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            transition: 'color 0.25s',
+          }}
+        >
+          {step.label}
+        </div>
+      </div>
+    </div>
   );
 }
 

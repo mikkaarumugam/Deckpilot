@@ -226,6 +226,11 @@ class AgentStepStatus(BaseModel):
     # running/done it's None.
     trigger_count: int | None = None
     remaining_count: int | None = None
+    # Plan-summary fn signature for the inner ActionPlan, same shape
+    # PlanStep renders for synchronous plans. Lets AgentQueue use the
+    # same rail+node + monospace visual instead of a different one.
+    signature: str = ""
+    affects: str = ""
     status: Literal["done", "running", "pending"]
 
 

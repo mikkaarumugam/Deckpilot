@@ -134,6 +134,8 @@ def agent_state() -> AgentStateResponse:
                 trigger_at=s.trigger_at,
                 trigger_count=s.trigger_count,
                 remaining_count=s.remaining_count,
+                signature=s.signature,
+                affects=s.affects,
                 status=s.status,  # type: ignore[arg-type]
             )
             for s in snap.steps

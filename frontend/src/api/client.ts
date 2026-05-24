@@ -141,6 +141,11 @@ export interface AgentStepStatus {
    *  per-step baseline. Null until the step is current; null again
    *  once the step has fired. */
   remaining_count: number | null;
+  /** Plan-summary fn signature, same shape as PlanStep.fn (e.g.
+   *  "transport.play(deck:1)" or "swap.bass(deck:1 → deck:2, t:4s)").
+   *  Lets the AgentQueue UI mirror the rich plan-timeline look. */
+  signature: string;
+  affects: string;
   status: 'done' | 'running' | 'pending';
 }
 

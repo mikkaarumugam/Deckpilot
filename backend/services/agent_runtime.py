@@ -57,6 +57,12 @@ class _PublicStepStatus:
     trigger_at: Optional[float] # populated for deck_position
     trigger_count: Optional[int]   # populated for after_beats (total beats)
     remaining_count: Optional[int] # populated for after_beats (beats to go)
+    # Plan summary signature for the inner ActionPlan — same shape the
+    # CommandCard's PlanStep uses for its `fn` field. Lets the
+    # AgentQueue UI render with the same rail+node + monospace
+    # signature visual as the regular plan timeline.
+    signature: str
+    affects: str
     status: str                 # "done" | "running" | "pending"
 
 
@@ -139,6 +145,10 @@ class AgentRuntime:
         if self._schedule is None:
             return AgentStateSnapshot(active=False, started_at_unix=None, steps=())
 
+        # Local import to avoid a top-level cycle (services → backend.services
+        # is the dependency direction we want to preserve).
+        from .signatures import affects_label, summary_signature
+
         rows: list[_PublicStepStatus] = []
         live = self._snapshot()
         for i, step in enumerate(self._schedule.steps):
@@ -156,6 +166,14 @@ class AgentRuntime:
                 and live is not None
             ) else None
 
+            # Signature = the same fn-style label PlanStep renders for
+            # synchronous plans. Inner-plan summary for multi-step bass
+            # swaps + composite moves; single-action steps fall through
+            # to render_action via summary_signature's 1-step branch.
+            inner_actions = [s.action for s in step.plan.steps]
+            signature = summary_signature(inner_actions) or step.label
+            affects = affects_label(inner_actions)
+
             rows.append(
                 _PublicStepStatus(
                     label=step.label,
@@ -164,6 +182,8 @@ class AgentRuntime:
                     trigger_at=at,
                     trigger_count=count,
                     remaining_count=remaining,
+                    signature=signature,
+                    affects=affects,
                     status=status,
                 )
             )
