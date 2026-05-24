@@ -54,19 +54,31 @@ if TYPE_CHECKING:
     from deckpilot.library import LibraryReader
 
 
+import os
+
 CLAUDE_BINARY = "claude"
 # 60s ceiling. Was 30s but library-aware Q&A prompts ("what should I mix
 # into X?") and long mini-set plans regularly need more — Haiku's extended-
-# thinking pass alone can take ~10-20s on those. Demo paths are still
-# fast; this just gives the slow paths room.
-TIMEOUT_SECONDS = 60
+# thinking pass alone can take ~10-20s on those. Bumped to 120s when running
+# Opus, which can take 30-60s on creative prompts (come-up-with-a-set,
+# library suggestions with reasoning).
+TIMEOUT_SECONDS = 120
 
-# Pin to Haiku. Parsing is a classification task with constrained JSON output;
-# the system prompt does the heavy lifting via schema + examples, so a small
-# fast model is correct. Sonnet/Opus would be wasted spend + latency.
-# If accuracy drops on edge cases (track via tests/eval.py), the right move is
-# to route fancier cases to Sonnet, not to upgrade the default.
-LLM_MODEL = "haiku"
+# Model selection. Default is Haiku (D-008): parsing is a classification
+# task with constrained JSON output; the system prompt does the heavy
+# lifting via schema + examples, so a small fast model is correct.
+#
+# Override via the DECKPILOT_LLM_MODEL env var when you want to A/B test
+# creative prompts against a bigger model. Try "opus" for goal-style
+# agent prompts ("come up with a 1 minute set") where you actually want
+# the model to be opinionated about track selection + decomposition.
+# Expect ~2-4× latency vs Haiku — fine for demos, not fine for the
+# regex-eager keystroke flow (which only ever asks for regex anyway).
+#
+# Accepted values pass through to `claude -p --model <value>` so any
+# alias the CLI accepts works: "haiku", "sonnet", "opus", or full IDs
+# like "claude-opus-4-7".
+LLM_MODEL = os.getenv("DECKPILOT_LLM_MODEL", "haiku")
 
 
 SYSTEM_PROMPT_BASE = """\
