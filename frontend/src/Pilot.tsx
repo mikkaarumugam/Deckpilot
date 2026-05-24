@@ -158,6 +158,7 @@ export function Pilot() {
           onCancelAutoLoad={flow.onCancelAutoLoad}
           onSubmit={flow.onSubmit}
           onQueue={flow.onQueue}
+          agentActive={agentState?.active ?? false}
         />
 
         {/* Agent queue — only renders when the AgentRuntime backend has

@@ -47,6 +47,11 @@ interface CommandCardProps {
    *  The hook decides whether this means "run the plan" or "ask the LLM". */
   onSubmit: () => void;
   onQueue?: () => void;
+  /** True while the AgentRuntime is actively walking a schedule. When
+   *  true we hide the SchedulePreview block — the AgentQueue panel below
+   *  shows live status with checkmarks + countdowns, so duplicating the
+   *  same rows above it is dead weight. */
+  agentActive?: boolean;
 }
 
 function stepStateFor(i: number, phase: Phase, executed: number): PlanStepState {
@@ -79,6 +84,7 @@ export function CommandCard({
   onCancelAutoLoad,
   onSubmit,
   onQueue,
+  agentActive,
 }: CommandCardProps) {
   const plan = parseResult?.plan ?? [];
   const totalSteps = plan.length;
@@ -263,7 +269,7 @@ export function CommandCard({
           autoLoadCountdownMs={autoLoadCountdownMs}
           onCancelAutoLoad={onCancelAutoLoad}
         />
-      ) : parseResult?.schedule && parseResult.schedule.length > 0 ? (
+      ) : parseResult?.schedule && parseResult.schedule.length > 0 && !agentActive ? (
         <SchedulePreview schedule={parseResult.schedule} />
       ) : (
         <PlanArea
