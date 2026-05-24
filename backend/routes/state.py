@@ -129,4 +129,10 @@ def state() -> StateResponse:
     if all(b > 0 for b in bpms):
         bpm_delta = bpms[1] - bpms[0]
 
-    return StateResponse(decks=decks, bpm_delta=bpm_delta)
+    # mixxx_alive: true when MixxxFeedback has received any MIDI from
+    # Mixxx within its liveness timeout (~6s). Drives the header dot.
+    # False if feedback never started OR Mixxx closed and the heartbeat
+    # responses dried up. See MixxxFeedback.is_alive().
+    mixxx_alive = feedback.is_alive()
+
+    return StateResponse(decks=decks, bpm_delta=bpm_delta, mixxx_alive=mixxx_alive)

@@ -71,6 +71,12 @@ class StateResponse(BaseModel):
     decks: list[DeckStatePayload]
     crossfade: float | None = None
     bpm_delta: float | None = None
+    # True when MixxxFeedback has received any MIDI from Mixxx within
+    # the last ~6 seconds — drives the header's "● connected" indicator.
+    # The backend's own reachability is implied by /state returning at all;
+    # this field specifically tells us whether Mixxx itself is alive on
+    # the other end of the IAC port. See MixxxFeedback.is_alive().
+    mixxx_alive: bool = False
 
 
 # ── Plan + parse ──────────────────────────────────────────────────────────

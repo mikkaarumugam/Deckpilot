@@ -117,28 +117,56 @@ export function Pilot() {
           <span style={{ font: '500 18px/1 var(--p-sans)', letterSpacing: '-0.01em' }}>DeckPilot</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 7,
-              font: '500 12px/1 var(--p-mono)',
-              color: stateSnapshot ? 'var(--p-muted)' : 'var(--p-muted-deep)',
-              letterSpacing: '0.06em',
-            }}
-          >
-            <span
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: 99,
-                background: stateSnapshot ? 'var(--p-live)' : 'var(--p-muted)',
-                boxShadow: stateSnapshot ? '0 0 8px var(--p-live)' : 'none',
-                animation: stateSnapshot ? 'pilotPulse var(--p-beat-4-ms) ease-in-out infinite' : 'none',
-              }}
-            />
-            <span>{stateSnapshot ? 'connected' : 'connecting…'}</span>
-          </div>
+          {(() => {
+            // Three states for the connection indicator:
+            //   no stateSnapshot      → backend itself unreachable → "connecting…"
+            //   snapshot + !alive     → backend up, Mixxx down or
+            //                            controller disabled → "no Mixxx"
+            //   snapshot + alive      → both alive → "connected"
+            // mixxx_alive is server-computed from MixxxFeedback's
+            // heartbeat — see deckpilot/adapters/midi_feedback.py.
+            const status: 'connecting' | 'no-mixxx' | 'connected' = !stateSnapshot
+              ? 'connecting'
+              : stateSnapshot.mixxx_alive
+                ? 'connected'
+                : 'no-mixxx';
+            const label =
+              status === 'connecting' ? 'connecting…'
+              : status === 'connected' ? 'connected'
+              : 'no Mixxx';
+            const dotColor =
+              status === 'connected' ? 'var(--p-live)'
+              : status === 'no-mixxx' ? '#f59e0b'  // amber: backend ok, Mixxx not
+              : 'var(--p-muted)';
+            const glow = status === 'connected' ? `0 0 8px ${dotColor}` : 'none';
+            const animation = status === 'connected'
+              ? 'pilotPulse var(--p-beat-4-ms) ease-in-out infinite'
+              : 'none';
+            return (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 7,
+                  font: '500 12px/1 var(--p-mono)',
+                  color: status === 'connected' ? 'var(--p-muted)' : 'var(--p-muted-deep)',
+                  letterSpacing: '0.06em',
+                }}
+              >
+                <span
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: 99,
+                    background: dotColor,
+                    boxShadow: glow,
+                    animation,
+                  }}
+                />
+                <span>{label}</span>
+              </div>
+            );
+          })()}
         </div>
       </div>
 

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import atexit
 import threading
+import time
 from dataclasses import dataclass, field, replace
 from typing import Callable
 
@@ -40,6 +41,14 @@ POSITION_CC = {0x32: 1, 0x33: 2}       # cc   → deck number
 LOOP_SIZE_CC = {0x38: 1, 0x39: 2}      # cc   → deck number
 
 DEFAULT_PORT_NAME = "IAC Driver Bus 1"
+
+# Liveness heartbeat tunables. Python pings every HEARTBEAT_SECONDS,
+# JS replies with _broadcastState (8 messages: play+bpm+position+
+# loop-size for each deck), reception updates _last_message_at.
+# is_alive() returns True when the last received message is within
+# ALIVE_TIMEOUT — generous so a missed beat doesn't flicker the indicator.
+HEARTBEAT_SECONDS = 3.0
+ALIVE_TIMEOUT = 6.0
 
 
 @dataclass(frozen=True)
@@ -97,6 +106,16 @@ class MixxxFeedback:
         # Mutable internal dict; snapshot() copies it into a frozen MixxxState.
         self._decks: dict[int, DeckState] = {1: DeckState(), 2: DeckState()}
         self._on_change: Callable[[], None] | None = None
+        # Liveness tracking. We can't distinguish "Mixxx closed" from
+        # "Mixxx alive but quiet" by listening alone (paused decks emit
+        # no traffic), so a background thread pings the request-state
+        # handshake every HEARTBEAT_SECONDS. JS replies via
+        # _broadcastState; receiving anything updates _last_message_at.
+        # is_alive() compares the timestamp against ALIVE_TIMEOUT.
+        self._last_message_at: float = 0.0
+        self._heartbeat_midi_out: rtmidi.MidiOut | None = None
+        self._heartbeat_stop = threading.Event()
+        self._heartbeat_thread: threading.Thread | None = None
 
     # ── lifecycle ────────────────────────────────────────────────────
 
@@ -128,6 +147,11 @@ class MixxxFeedback:
         # See DeckPilot.requestState in mixxx.midi.js.
         self._request_initial_state()
 
+        # Start the liveness heartbeat. It pings the request-state
+        # handshake every HEARTBEAT_SECONDS; the reply traffic updates
+        # _last_message_at, which is_alive() reads.
+        self._start_heartbeat()
+
         return self
 
     def _request_initial_state(self) -> None:
@@ -149,6 +173,9 @@ class MixxxFeedback:
             midi_out.close_port()
 
     def stop(self) -> None:
+        # Stop the heartbeat thread first so it doesn't try to send
+        # while the port is being torn down.
+        self._stop_heartbeat()
         if self._midi_in is not None:
             try:
                 # Cancel the callback first so no new messages can land on
@@ -159,6 +186,69 @@ class MixxxFeedback:
             except Exception:
                 pass
             self._midi_in = None
+
+    def is_alive(self, timeout_seconds: float = ALIVE_TIMEOUT) -> bool:
+        """True when we've received any MIDI from Mixxx within the last
+        `timeout_seconds`. Backs DeckPilot's "● connected" indicator —
+        false means Mixxx is closed, the controller isn't enabled, or
+        the IAC port is broken.
+
+        We can't detect liveness from received traffic alone because
+        idle decks emit nothing. The heartbeat thread (see
+        _start_heartbeat) pings every HEARTBEAT_SECONDS so a healthy
+        Mixxx is guaranteed to reply via _broadcastState within ~100ms.
+        """
+        if self._last_message_at == 0.0:
+            return False
+        return (time.time() - self._last_message_at) < timeout_seconds
+
+    # ── heartbeat ────────────────────────────────────────────────────
+
+    def _start_heartbeat(self) -> None:
+        """Open a persistent MidiOut on the IAC port and spin up a
+        daemon thread that emits the request-state ping every
+        HEARTBEAT_SECONDS. JS replies with a full state broadcast;
+        receiving any message updates _last_message_at."""
+        try:
+            midi_out = rtmidi.MidiOut()
+            ports = midi_out.get_ports()
+            idx = next(i for i, n in enumerate(ports) if self._port_name in n)
+            midi_out.open_port(idx)
+        except (StopIteration, Exception):
+            # If we can't even open the port for heartbeats, is_alive()
+            # will just stay false — degraded but not crashing.
+            return
+        self._heartbeat_midi_out = midi_out
+        self._heartbeat_stop.clear()
+
+        def loop() -> None:
+            while not self._heartbeat_stop.wait(timeout=HEARTBEAT_SECONDS):
+                out = self._heartbeat_midi_out
+                if out is None:
+                    return
+                try:
+                    out.send_message([0x90, 0x7F, 0x7F])
+                except Exception:
+                    # Port probably being torn down. Bail silently;
+                    # _stop_heartbeat will join the thread.
+                    return
+
+        self._heartbeat_thread = threading.Thread(
+            target=loop, name="MixxxFeedback-heartbeat", daemon=True
+        )
+        self._heartbeat_thread.start()
+
+    def _stop_heartbeat(self) -> None:
+        self._heartbeat_stop.set()
+        if self._heartbeat_thread is not None:
+            self._heartbeat_thread.join(timeout=2.0)
+            self._heartbeat_thread = None
+        if self._heartbeat_midi_out is not None:
+            try:
+                self._heartbeat_midi_out.close_port()
+            except Exception:
+                pass
+            self._heartbeat_midi_out = None
 
     # ── state access ─────────────────────────────────────────────────
 
@@ -181,6 +271,10 @@ class MixxxFeedback:
         data, _dt = msg
         if not data:
             return
+        # Any received message is proof Mixxx is alive — stamp the
+        # liveness timestamp regardless of whether the message turns
+        # out to be one we decode below. is_alive() reads this.
+        self._last_message_at = time.time()
         # Pad to 3 bytes so unpacking is safe even for unusual messages.
         status, d1, d2 = (data + [0, 0])[:3]
         kind = status & 0xF0

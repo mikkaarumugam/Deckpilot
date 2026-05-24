@@ -48,6 +48,10 @@ export interface StateResponse {
   decks: DeckStatePayload[];
   crossfade: number | null;
   bpm_delta: number | null;
+  /** True when MixxxFeedback received any MIDI from Mixxx within the
+   *  last ~6s. Drives the header dot — false means Mixxx is closed or
+   *  the controller isn't enabled, even if the backend itself is fine. */
+  mixxx_alive: boolean;
 }
 
 export interface PlanStepPayload {
