@@ -18,7 +18,6 @@
 
 import { useEffect, useState } from 'react';
 
-import { AgentQueue } from './components/AgentQueue';
 import { CommandCard } from './components/CommandCard';
 import { DeckCard } from './components/DeckCard';
 import { HistoryItem } from './components/HistoryItem';
@@ -162,14 +161,8 @@ export function Pilot() {
           onCancelAutoLoad={flow.onCancelAutoLoad}
           onSubmit={flow.onSubmit}
           onQueue={flow.onQueue}
-          agentActive={agentState?.active ?? false}
+          agentState={agentState}
         />
-
-        {/* Agent queue — only renders when the AgentRuntime backend has
-            an active schedule. The polling hook keeps the panel in sync. */}
-        {agentState?.active && (
-          <AgentQueue state={agentState} decks={decks} />
-        )}
 
         {/* Try chips */}
         <div style={{ marginBottom: 28 }}>

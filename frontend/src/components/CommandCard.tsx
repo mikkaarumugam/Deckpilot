@@ -17,6 +17,8 @@
 import { useEffect, useRef } from 'react';
 
 import {
+  api,
+  type AgentStateResponse,
   type ParseResponse,
   type ScheduledPlanPayload,
   type SuggestionPayload,
@@ -50,11 +52,12 @@ interface CommandCardProps {
    *  The hook decides whether this means "run the plan" or "ask the LLM". */
   onSubmit: () => void;
   onQueue?: () => void;
-  /** True while the AgentRuntime is actively walking a schedule. When
-   *  true we hide the SchedulePreview block — the AgentQueue panel below
-   *  shows live status with checkmarks + countdowns, so duplicating the
-   *  same rows above it is dead weight. */
-  agentActive?: boolean;
+  /** Live agent state — pushed in from Pilot.tsx's useAgentState poll.
+   *  When a schedule is active and `agentState.steps[i].status` flips
+   *  to "running"/"done", the SchedulePreview's matching ScheduledStepGroup
+   *  drives its inner PlanStep circles accordingly. Pre-run this is
+   *  inactive and everything renders as 'pending'. */
+  agentState?: AgentStateResponse | null;
 }
 
 function stepStateFor(i: number, phase: Phase, executed: number): PlanStepState {
@@ -87,7 +90,7 @@ export function CommandCard({
   onCancelAutoLoad,
   onSubmit,
   onQueue,
-  agentActive,
+  agentState,
 }: CommandCardProps) {
   const plan = parseResult?.plan ?? [];
   const totalSteps = plan.length;
@@ -304,8 +307,8 @@ export function CommandCard({
           autoLoadCountdownMs={autoLoadCountdownMs}
           onCancelAutoLoad={onCancelAutoLoad}
         />
-      ) : parseResult?.schedule && parseResult.schedule.length > 0 && !agentActive ? (
-        <SchedulePreview schedule={parseResult.schedule} />
+      ) : parseResult?.schedule && parseResult.schedule.length > 0 ? (
+        <SchedulePreview schedule={parseResult.schedule} agentState={agentState} />
       ) : (
         <PlanArea
           plan={plan}
@@ -585,12 +588,21 @@ function SuggestionPanel({
 /** SchedulePreview — shown when parseResult.schedule is populated (a
  *  D-021/D-023 goal-style response). Each scheduled step gets a
  *  header row (label + trigger) with its inner atomic actions
- *  rendered underneath as a nested PlanStep timeline. This preserves
- *  the "depth of decomposition" visual that the streaming view shows
- *  — collapsing schedule steps to one-liner rows threw away the most
- *  impressive part of the parse, which is exactly what the audience
- *  should see before they hit Run. */
-function SchedulePreview({ schedule }: { schedule: ScheduledPlanPayload[] }) {
+ *  rendered underneath as a nested PlanStep timeline.
+ *
+ *  Live state: when `agentState` is non-null and `active`, each
+ *  ScheduledStepGroup looks up its matching `agentState.steps[i]`
+ *  and inherits status (done/running/pending). Inner PlanStep
+ *  circles fill/pulse/outline accordingly — same visual language as
+ *  a flat plan execution, just nested under the trigger header. */
+function SchedulePreview({
+  schedule,
+  agentState,
+}: {
+  schedule: ScheduledPlanPayload[];
+  agentState?: AgentStateResponse | null;
+}) {
+  const live = agentState?.active ? agentState : null;
   return (
     <div
       style={{
@@ -603,20 +615,57 @@ function SchedulePreview({ schedule }: { schedule: ScheduledPlanPayload[] }) {
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 8,
-          font: '500 11px/1 var(--p-mono)',
-          color: 'var(--p-accent)',
-          letterSpacing: '0.18em',
-          textTransform: 'uppercase',
+          justifyContent: 'space-between',
           marginBottom: 14,
         }}
       >
-        <span>🤖 Agent schedule · {schedule.length} step{schedule.length === 1 ? '' : 's'}</span>
+        <span
+          style={{
+            font: '500 11px/1 var(--p-mono)',
+            color: 'var(--p-accent)',
+            letterSpacing: '0.18em',
+            textTransform: 'uppercase',
+          }}
+        >
+          🤖 Agent schedule · {schedule.length} step{schedule.length === 1 ? '' : 's'}
+          {live && <span style={{ marginLeft: 8, color: 'var(--p-live)' }}>· running</span>}
+        </span>
+        {live && (
+          <span
+            onClick={() => {
+              // Fire-and-forget cancel — the AgentRuntime will go
+              // active=false on the next poll, the live indicator
+              // collapses, and inner-step states freeze where they were.
+              void api.agentCancel();
+            }}
+            style={{
+              cursor: 'pointer',
+              font: '500 11px/1 var(--p-mono)',
+              color: 'var(--p-muted)',
+              letterSpacing: '0.06em',
+            }}
+          >
+            cancel
+          </span>
+        )}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-        {schedule.map((step, i) => (
-          <ScheduledStepGroup key={i} n={i + 1} step={step} />
-        ))}
+        {schedule.map((step, i) => {
+          // Match by index — AgentRuntime always emits steps in the
+          // same order they're scheduled, so indexed lookup is safe.
+          const liveStep = live?.steps?.[i];
+          const status: 'done' | 'running' | 'pending' = liveStep?.status ?? 'pending';
+          const remainingBeats = liveStep?.remaining_count;
+          return (
+            <ScheduledStepGroup
+              key={i}
+              n={i + 1}
+              step={step}
+              status={status}
+              remainingBeats={remainingBeats ?? null}
+            />
+          );
+        })}
       </div>
       <div
         style={{
@@ -625,7 +674,9 @@ function SchedulePreview({ schedule }: { schedule: ScheduledPlanPayload[] }) {
           color: 'var(--p-muted)',
         }}
       >
-        Hit Run to start. The agent will fire each step when its trigger condition hits.
+        {live
+          ? 'Agent is firing each step when its trigger hits. Cancel from the panel below.'
+          : 'Hit Run to start. The agent will fire each step when its trigger condition hits.'}
       </div>
     </div>
   );
@@ -633,16 +684,34 @@ function SchedulePreview({ schedule }: { schedule: ScheduledPlanPayload[] }) {
 
 /** One scheduled step rendered as: header row (step number + label +
  *  trigger description) followed by its inner ActionPlan as a nested
- *  rail-and-node timeline. Each inner action uses PlanStep with state
- *  fixed to 'pending' — this is a preview, no execution yet. */
-function ScheduledStepGroup({ n, step }: { n: number; step: ScheduledPlanPayload }) {
+ *  rail-and-node timeline. Inner PlanStep states inherit the outer
+ *  scheduled step's status — when the agent's runtime says this
+ *  scheduled step is "running" or "done", all its inner actions
+ *  visually flip. (Per-inner-action progress would require executor
+ *  instrumentation; we're at outer-step granularity for now, which
+ *  is what AgentQueue had + matches the runtime's snapshot model.) */
+function ScheduledStepGroup({
+  n,
+  step,
+  status,
+  remainingBeats,
+}: {
+  n: number;
+  step: ScheduledPlanPayload;
+  status: 'done' | 'running' | 'pending';
+  remainingBeats: number | null;
+}) {
+  const isRunning = status === 'running';
+  const isDone = status === 'done';
   return (
     <div
       style={{
-        background: 'var(--p-surface)',
-        border: '1px solid var(--p-border)',
+        background: isRunning ? 'var(--p-accent-dim)' : 'var(--p-surface)',
+        border: `1px solid ${isRunning ? 'var(--p-accent-edge)' : 'var(--p-border)'}`,
         borderRadius: 10,
         padding: '12px 14px 14px',
+        opacity: isDone ? 0.6 : 1,
+        transition: 'background 0.25s, border-color 0.25s, opacity 0.25s',
       }}
     >
       {/* Header: step number + label + trigger + action count */}
@@ -678,7 +747,11 @@ function ScheduledStepGroup({ n, step }: { n: number; step: ScheduledPlanPayload
           {step.label}
         </span>
         <span style={{ font: '500 10.5px/1 var(--p-mono)', color: 'var(--p-accent)' }}>
-          {describeTriggerInline(step)}
+          {/* Show live beats-to-go for after_beats during running;
+              otherwise the static trigger description. */}
+          {remainingBeats != null && step.trigger.type === 'after_beats'
+            ? `${remainingBeats} beat${remainingBeats === 1 ? '' : 's'} to go`
+            : describeTriggerInline(step)}
         </span>
         <span
           style={{
@@ -690,7 +763,8 @@ function ScheduledStepGroup({ n, step }: { n: number; step: ScheduledPlanPayload
           {step.plan.length} {step.plan.length === 1 ? 'act' : 'acts'}
         </span>
       </div>
-      {/* Inner plan — same rail+node treatment as a flat plan */}
+      {/* Inner plan — same rail+node treatment as a flat plan.
+          State inherits from the outer scheduled step's status. */}
       <div style={{ display: 'flex', flexDirection: 'column' }}>
         {step.plan.map((act, j) => (
           <PlanStep
@@ -698,7 +772,7 @@ function ScheduledStepGroup({ n, step }: { n: number; step: ScheduledPlanPayload
             n={j + 1}
             step={act}
             last={j === step.plan.length - 1}
-            state="pending"
+            state={status}
           />
         ))}
       </div>
