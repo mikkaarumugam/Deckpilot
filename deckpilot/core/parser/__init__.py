@@ -34,6 +34,7 @@ def parse(
     mode: str = "auto",
     library: "LibraryReader | None" = None,
     deck_state: "MixxxState | None" = None,
+    model: str | None = None,
 ) -> "ActionPlan | AgentSchedule":
     """
     Parse natural-language text into either an ActionPlan (single-shot)
@@ -66,4 +67,4 @@ def parse(
         if mode == "regex":
             raise ParseError(f"no regex rule matched: {text!r}")
 
-    return llm.parse(text, library=library, deck_state=deck_state)
+    return llm.parse(text, library=library, deck_state=deck_state, model=model)

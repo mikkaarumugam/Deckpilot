@@ -16,7 +16,9 @@
 
 import {
   ACCENT_PRESETS,
+  MODEL_OPTIONS,
   SERIF_FONTS,
+  type LLMModel,
   type Theme,
   type UseTweaksApi,
 } from '../hooks/useTweaks';
@@ -31,7 +33,7 @@ interface TweaksPanelProps {
 }
 
 export function TweaksPanel({ api, onClose }: TweaksPanelProps) {
-  const { tweaks, setTheme, setAccent, setSerif, reset } = api;
+  const { tweaks, setTheme, setAccent, setSerif, setModel, reset } = api;
 
   return (
     <div
@@ -134,6 +136,10 @@ export function TweaksPanel({ api, onClose }: TweaksPanelProps) {
 
         <Section label="Serif font">
           <SerifList value={tweaks.serif} onChange={setSerif} />
+        </Section>
+
+        <Section label="LLM model">
+          <ModelList value={tweaks.model} onChange={setModel} />
         </Section>
       </div>
     </div>
@@ -283,6 +289,54 @@ function SerifList({
             }}
           >
             {font}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function ModelList({
+  value,
+  onChange,
+}: {
+  value: LLMModel;
+  onChange: (m: LLMModel) => void;
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      {MODEL_OPTIONS.map((opt) => {
+        const active = value === opt.value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => onChange(opt.value)}
+            style={{
+              padding: '6px 10px',
+              border: '1px solid var(--p-border)',
+              background: active ? 'var(--p-accent-dim)' : 'var(--p-bg)',
+              borderColor: active ? 'var(--p-accent-edge)' : 'var(--p-border)',
+              borderRadius: 7,
+              color: 'var(--p-fg)',
+              cursor: 'pointer',
+              textAlign: 'left',
+              transition: 'background 0.15s, border-color 0.15s',
+              display: 'flex',
+              alignItems: 'baseline',
+              justifyContent: 'space-between',
+              gap: 10,
+            }}
+          >
+            <span style={{ font: '500 13px/1.1 var(--p-mono)' }}>{opt.label}</span>
+            <span
+              style={{
+                font: '400 10.5px/1.1 var(--p-mono)',
+                color: 'var(--p-muted)',
+              }}
+            >
+              {opt.note}
+            </span>
           </button>
         );
       })}

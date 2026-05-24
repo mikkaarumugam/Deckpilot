@@ -82,7 +82,7 @@ async def parse_stream(req: ParseRequest) -> StreamingResponse:
 
     async def event_stream() -> AsyncIterator[str]:
         async for event in stream_parse_llm(
-            req.text, library=library, deck_state=deck_state
+            req.text, library=library, deck_state=deck_state, model=req.model
         ):
             kind = event["type"]
 

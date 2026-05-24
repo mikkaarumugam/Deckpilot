@@ -213,13 +213,17 @@ export const api = {
    * then falls back to LLM. Errors with `error="no_regex_match"` aren't
    * real failures — they're the regex-only "you'd need the LLM to handle
    * this" signal.
+   *
+   * `model` overrides the server default per request (Tweaks-panel-driven
+   * Haiku / Sonnet / Opus toggle). Ignored on the regex path.
    */
   parse(
     text: string,
     mode: 'auto' | 'regex' | 'llm' = 'auto',
     signal?: AbortSignal,
+    model?: string,
   ): Promise<ParseResponse> {
-    return postJson<ParseResponse>('/parse', { text, mode }, signal);
+    return postJson<ParseResponse>('/parse', { text, mode, model }, signal);
   },
 
   execute(plan: PlanStepPayload[], signal?: AbortSignal): Promise<ExecuteResponse> {
@@ -242,11 +246,12 @@ export const api = {
   async *parseStream(
     text: string,
     signal?: AbortSignal,
+    model?: string,
   ): AsyncIterableIterator<ParseStreamEvent> {
     const res = await fetch(`${BASE}/parse/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, mode: 'llm' }),
+      body: JSON.stringify({ text, mode: 'llm', model }),
       signal,
     });
     if (!res.ok || !res.body) {

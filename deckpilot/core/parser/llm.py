@@ -403,6 +403,7 @@ def parse(
     *,
     library: "LibraryReader | None" = None,
     deck_state: "MixxxState | None" = None,
+    model: str | None = None,
 ) -> "ActionPlan | AgentSchedule":
     """Call Claude via `claude -p` and turn its JSON into either an
     ActionPlan (single-shot) or an AgentSchedule (goal-style prompt
@@ -412,6 +413,11 @@ def parse(
     provided, the LLM can pick tracks (LoadTrack) and reason about which
     deck to use. When omitted, the model declines library-related
     requests with a clear reason.
+
+    `model` overrides the default (LLM_MODEL env-var-resolved) for this
+    single call. Lets the UI flip between Haiku / Sonnet / Opus per
+    request without restarting the server. None falls through to the
+    process-wide default.
 
     Return type is a union — callers check isinstance and route
     accordingly. The shape is decided by the LLM based on the prompt
@@ -431,10 +437,11 @@ def parse(
         + text
         + "\n\nReturn ONLY the JSON object now."
     )
+    effective_model = model or LLM_MODEL
 
     try:
         result = subprocess.run(
-            [CLAUDE_BINARY, "-p", "--model", LLM_MODEL, full_prompt],
+            [CLAUDE_BINARY, "-p", "--model", effective_model, full_prompt],
             capture_output=True, text=True,
             timeout=TIMEOUT_SECONDS, check=True,
         )

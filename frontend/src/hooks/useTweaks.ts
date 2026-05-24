@@ -23,6 +23,11 @@ import { useCallback, useEffect, useState } from 'react';
 
 export type Theme = 'dark' | 'light';
 
+/** LLM model the parser uses on the LLM path. Sent to the backend
+ *  per-request so the user can flip without restarting uvicorn.
+ *  Values are passed through to `claude -p --model <value>`. */
+export type LLMModel = 'haiku' | 'sonnet' | 'opus';
+
 export interface Tweaks {
   theme: Theme;
   /** Hex color used for the coral-ish accent. */
@@ -30,6 +35,11 @@ export interface Tweaks {
   /** Display serif font family name (must be one already loaded in
    *  index.html, otherwise the browser falls back through the chain). */
   serif: string;
+  /** Which Claude model the LLM parser invokes. Haiku is fastest +
+   *  cheapest (the documented default per D-008). Opus is most
+   *  creative for goal-style prompts — pick it for "come up with a
+   *  set" or "what should I mix into X". Sonnet is the middle ground. */
+  model: LLMModel;
 }
 
 /** Presets shown as colored swatches in the Tweaks panel. */
@@ -55,7 +65,15 @@ const DEFAULTS: Tweaks = {
   theme: 'dark',
   accent: '#ff5a2e',
   serif: 'Instrument Serif',
+  model: 'haiku',
 };
+
+/** Display labels + descriptions for the model selector. */
+export const MODEL_OPTIONS: { value: LLMModel; label: string; note: string }[] = [
+  { value: 'haiku', label: 'Haiku', note: 'fast · ~4s · default' },
+  { value: 'sonnet', label: 'Sonnet', note: 'middle · ~8s' },
+  { value: 'opus', label: 'Opus', note: 'creative · ~15s' },
+];
 
 const STORAGE_KEY = 'deckpilot.tweaks';
 
@@ -85,6 +103,7 @@ export interface UseTweaksApi {
   setTheme: (t: Theme) => void;
   setAccent: (a: string) => void;
   setSerif: (s: string) => void;
+  setModel: (m: LLMModel) => void;
   reset: () => void;
 }
 
@@ -140,7 +159,11 @@ export function useTweaks(): UseTweaksApi {
     (serif: string) => setTweaks((prev) => ({ ...prev, serif })),
     [],
   );
+  const setModel = useCallback(
+    (model: LLMModel) => setTweaks((prev) => ({ ...prev, model })),
+    [],
+  );
   const reset = useCallback(() => setTweaks(DEFAULTS), []);
 
-  return { tweaks, setTheme, setAccent, setSerif, reset };
+  return { tweaks, setTheme, setAccent, setSerif, setModel, reset };
 }

@@ -111,7 +111,16 @@ export interface PilotFlowApi {
   onReset: () => void;
 }
 
-export function usePilotFlow(): PilotFlowApi {
+/** Options accepted by the flow hook. Currently just the LLM model
+ *  the user picked in Tweaks; included on every parse call so the
+ *  backend can route this request to Haiku / Sonnet / Opus without
+ *  a uvicorn restart. */
+export interface PilotFlowOptions {
+  model?: string;
+}
+
+export function usePilotFlow(opts: PilotFlowOptions = {}): PilotFlowApi {
+  const { model } = opts;
   const [text, setText_] = useState('');
   const [phase, setPhase] = useState<Phase>('typing');
   const [parseResult, setParseResult] = useState<ParseResponse | null>(null);
@@ -254,7 +263,7 @@ export function usePilotFlow(): PilotFlowApi {
     parseAbortRef.current = controller;
 
     try {
-      for await (const event of api.parseStream(text, controller.signal)) {
+      for await (const event of api.parseStream(text, controller.signal, model)) {
         if (controller.signal.aborted) return;
 
         if (event.type === 'started') continue;

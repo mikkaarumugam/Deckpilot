@@ -156,7 +156,12 @@ async def parse(req: ParseRequest) -> ParseResponse:
     # FastAPI's event loop stays responsive.
     try:
         result = await asyncio.to_thread(
-            facade_parse, req.text, library=library, deck_state=deck_state, mode="llm"
+            facade_parse,
+            req.text,
+            library=library,
+            deck_state=deck_state,
+            mode="llm",
+            model=req.model,
         )
     except ParseError as exc:
         return ParseResponse(

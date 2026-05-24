@@ -124,6 +124,7 @@ async def stream_parse_llm(
     *,
     library: "LibraryReader | None" = None,
     deck_state: "MixxxState | None" = None,
+    model: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Async generator. Yields events in this order:
 
@@ -157,7 +158,7 @@ async def stream_parse_llm(
         CLAUDE_BINARY,
         "-p",
         "--model",
-        LLM_MODEL,
+        model or LLM_MODEL,
         "--output-format",
         "stream-json",
         "--include-partial-messages",

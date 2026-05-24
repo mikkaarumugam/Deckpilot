@@ -37,9 +37,13 @@ const PRESET_CHIPS = [
 ] as const;
 
 export function Pilot() {
-  const flow = usePilotFlow();
-  const stateSnapshot = useDeckState();
   const tweaksApi = useTweaks();
+  // Pass the user-selected model into the flow hook so LLM parses
+  // route to whatever they picked in the Tweaks panel (haiku / sonnet
+  // / opus). The hook reads `model` on every render — flipping the
+  // dropdown applies on the next parse, no reload needed.
+  const flow = usePilotFlow({ model: tweaksApi.tweaks.model });
+  const stateSnapshot = useDeckState();
   const agentState = useAgentState();
   useBpmSync(stateSnapshot);
   const [historyCleared, setHistoryCleared] = useState(false);

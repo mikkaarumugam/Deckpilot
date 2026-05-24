@@ -152,6 +152,12 @@ class ParseRequest(BaseModel):
     # Haiku" hint without treating it as a real failure.
     # mode="llm" skips regex (rarely needed).
     mode: Literal["auto", "regex", "llm"] = "auto"
+    # Optional per-request override of the LLM model. Frontend sends
+    # whatever the user picked in the Tweaks panel ("haiku" / "sonnet" /
+    # "opus" or any value the `claude -p --model` flag accepts).
+    # None falls through to the server's default (env-var-configured).
+    # Only consulted on the LLM path — regex is model-agnostic.
+    model: str | None = None
 
 
 # ── Execute / undo / reset ───────────────────────────────────────────────
