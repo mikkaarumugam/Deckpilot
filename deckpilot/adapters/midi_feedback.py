@@ -328,7 +328,14 @@ class MixxxFeedback:
 
         elif kind == 0xB0 and d1 in BPM_CC:
             deck = BPM_CC[d1]
-            bpm = BPM_MIN + (d2 / 127.0) * (BPM_MAX - BPM_MIN)
+            # CC value 0 is the JS side's "no track / unknown BPM" sentinel
+            # (see mixxx.midi.js:_sendBpm). Real BPM values are encoded as
+            # 1..127. Without this guard, an empty deck would decode to
+            # BPM_MIN (60.0) and surface as "60.0 BPM" in the UI.
+            if d2 == 0:
+                bpm = 0.0
+            else:
+                bpm = BPM_MIN + (d2 / 127.0) * (BPM_MAX - BPM_MIN)
             with self._lock:
                 prev = self._decks[deck]
                 # Avoid float-noise re-renders: only flag changed when the

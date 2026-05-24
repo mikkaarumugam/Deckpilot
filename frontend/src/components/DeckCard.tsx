@@ -119,7 +119,7 @@ export function DeckCard({
               fontFeatureSettings: '"tnum" 1',
             }}
           >
-            {bpm.toFixed(1)}
+            {bpm > 0 ? bpm.toFixed(1) : '—'}
           </span>
           <span
             style={{
