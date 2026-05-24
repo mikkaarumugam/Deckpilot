@@ -271,13 +271,23 @@ class MixxxFeedback:
         data, _dt = msg
         if not data:
             return
-        # Any received message is proof Mixxx is alive — stamp the
-        # liveness timestamp regardless of whether the message turns
-        # out to be one we decode below. is_alive() reads this.
-        self._last_message_at = time.time()
         # Pad to 3 bytes so unpacking is safe even for unusual messages.
         status, d1, d2 = (data + [0, 0])[:3]
         kind = status & 0xF0
+
+        # macOS's IAC Driver is bidirectional — anything our heartbeat
+        # thread writes to IAC echoes back to our own MidiIn. Filter the
+        # request-state ping (note 0x7F) at the top so it doesn't count
+        # as "Mixxx replied." Without this, is_alive() returns True
+        # forever (we'd keep feeding ourselves "alive" pings regardless
+        # of Mixxx's actual state).
+        if kind == 0x90 and d1 == 0x7F:
+            return
+
+        # Recognized-Mixxx-response messages stamp the liveness timestamp.
+        # Anything else (unusual SysEx, controller noise) we don't count
+        # — keeps is_alive() honest.
+        self._last_message_at = time.time()
         changed = False
 
         if kind in (0x90, 0x80) and d1 in PLAY_STATE_NOTE:
