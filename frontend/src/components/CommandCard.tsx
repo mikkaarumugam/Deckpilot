@@ -34,7 +34,7 @@ interface CommandCardProps {
   error: string | null;
   suggestion: SuggestionPayload | null;
   /** True when the regex parser found no match. UI uses this to render
-   *  a "Press ⏎ to ask Haiku" hint instead of an empty plan area. */
+   *  a "Press ⏎ to ask AI" hint instead of an empty plan area. */
   regexMissed: boolean;
   /** True while the GUI auto-load countdown is in flight. Drives the
    *  Cancel button + animated progress bar on the suggestion card.
@@ -91,12 +91,14 @@ export function CommandCard({
   const totalSteps = plan.length;
   const currentStep = phase === 'running' ? executed + 1 : phase === 'done' ? totalSteps : 0;
   const stepWord = totalSteps === 1 ? '' : 's';
-  // Only surface the "ask Haiku" hint when the user has typed something
+  // Only surface the "ask AI" hint when the user has typed something
   // meaningful — avoids it flickering on after 2-3 chars during normal typing.
+  // Model-agnostic copy because the user may have picked Haiku / Sonnet / Opus
+  // in the Tweaks panel; we don't want to call out a specific one in the UI.
   const hintReady = regexMissed && text.trim().length >= 4;
   const parsedLabel = suggestion
     ? parseResult?.parsed ?? '(suggestion)'
-    : parseResult?.parsed ?? (hintReady ? '(press ⏎ to ask Haiku)' : '(awaiting input)');
+    : parseResult?.parsed ?? (hintReady ? '(press ⏎ to ask AI)' : '(awaiting input)');
   const confValue = parseResult?.conf ?? 0;
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -350,9 +352,9 @@ function PlanArea({
             }}
           >
             {phase === 'parsing'
-              ? 'asking Haiku…'
+              ? 'asking AI…'
               : regexMissed && hasText
-                ? <>regex didn't match — press <span style={{ color: 'var(--p-accent)' }}>⏎</span> to ask Haiku</>
+                ? <>regex didn't match — press <span style={{ color: 'var(--p-accent)' }}>⏎</span> to ask AI</>
                 : 'plan will render here'}
           </div>
         )}
