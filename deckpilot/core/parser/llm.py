@@ -183,6 +183,56 @@ Bass-swap rationale (so you can adapt for variants like "8-second bass swap"):
 - At the fade end, bring deck 2's bass back to neutral.
 - Always: bass-cut events go to set_eq with band="low", value=0.0.
 
+ALTERNATIVE transition styles — pick the technique that matches the verb the
+user used. Bass swap is the default ONLY when the verb is generic ("transition",
+"swap", "mix into"). When the user picks a more specific verb, honour it.
+
+"filter into deck 2 over 4 seconds" / "sweep into deck 2" (filter-led, no EQ work):
+{
+  "plan": [
+    {"at":0, "action":"sync",           "deck":2},
+    {"at":0, "action":"play_deck",      "deck":2},
+    {"at":0, "action":"fade_to_deck",   "deck":2, "seconds":4},
+    {"at":2, "action":"set_filter",     "deck":1, "value":1.0},
+    {"at":4, "action":"set_filter",     "deck":1, "value":0.5}
+  ]
+}
+Filter-sweep rationale: as the crossfader rides toward deck 2, sweep deck 1's
+filter upward (drains the lows out audibly). Reset to bypass at the end so
+deck 1 is clean for reuse. No EQ moves — the filter does all the
+frequency-clearing.
+
+"slam into deck 2" / "drop into deck 2" / "cut into deck 2" (instant hard cut):
+{
+  "plan": [
+    {"at":0, "action":"sync",           "deck":2},
+    {"at":0, "action":"play_deck",      "deck":2},
+    {"at":0, "action":"set_crossfader", "value":1.0}
+  ]
+}
+Drop-swap rationale: no bass swap, no fade. Sync + start + cut the crossfader
+fully across. Use when the user picks an aggressive verb — "slam", "drop",
+"cut", "hard cut". Often pairs well with the `after_beats` trigger so the
+slam lands on a downbeat.
+
+"echo deck 1 out into deck 2" / "tail out and bring in deck 2" (FX-led):
+{
+  "plan": [
+    {"at":0, "action":"sync",           "deck":2},
+    {"at":0, "action":"play_deck",      "deck":2},
+    {"at":0, "action":"set_fx",         "deck":1, "unit":1, "value":1.0},
+    {"at":0, "action":"fade_to_deck",   "deck":2, "seconds":4},
+    {"at":4, "action":"set_fx",         "deck":1, "unit":1, "value":0.0}
+  ]
+}
+Echo-out rationale: pour FX wet onto the outgoing deck as it fades — the deck
+trails away into the effect. Reset FX wet at the end so deck 1 doesn't keep
+the FX on when it's reused. Use when the user says "echo", "tail out",
+"fade out with reverb", or similar.
+
+When in doubt, default to the bass swap above — it's the safest, most musical
+choice and works for any pair of compatible tracks.
+
 LIBRARY-AWARE example (only valid when LIBRARY CONTEXT is provided):
 "queue a daft punk track on deck 2" ->
 {"plan":[{"at":0,"action":"load_track","deck":2,"track_id":<id>,"reasoning":"<one short line>"}]}
