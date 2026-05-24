@@ -35,12 +35,11 @@ export function HistoryItem({ when, prompt, parsed, summary, diff, isNew }: Hist
       >
         <div
           style={{
-            font: 'italic 400 16px/1.3 var(--p-serif)',
+            font: '500 14px/1.3 var(--p-mono)',
             color: 'var(--p-fg)',
-            letterSpacing: '-0.005em',
           }}
         >
-          &ldquo;{prompt}&rdquo;
+          › {prompt}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: '0 0 auto', marginLeft: 14 }}>
           <span style={{ font: '400 11px/1 var(--p-mono)', color: 'var(--p-muted-deep)' }}>

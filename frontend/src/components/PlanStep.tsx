@@ -15,6 +15,7 @@
  */
 
 import { type PlanStepState, type PlanStepData } from '../types';
+import { Signature } from './Signature';
 
 interface PlanStepProps {
   n: number;
@@ -93,15 +94,12 @@ export function PlanStep({ n, step, last, state }: PlanStepProps) {
           <span style={{ font: '500 11.5px/1 var(--p-mono)', color: 'var(--p-muted-deep)' }}>
             {String(n).padStart(2, '0')}
           </span>
-          <span
-            style={{
-              font: '500 14px/1.2 var(--p-mono)',
-              color: isPending ? 'var(--p-fg-dim)' : 'var(--p-fg)',
-              transition: 'color 0.25s',
-            }}
-          >
-            {step.fn}
-          </span>
+          <Signature
+            text={step.fn}
+            size={14}
+            fgColor={isPending ? 'var(--p-fg-dim)' : 'var(--p-fg)'}
+            style={{ transition: 'color 0.25s' }}
+          />
           <span style={{ flex: 1 }} />
           {step.t && step.t !== '—' && (
             <span style={{ font: '500 11.5px/1 var(--p-mono)', color: 'var(--p-muted)' }}>

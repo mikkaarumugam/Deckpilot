@@ -15,6 +15,7 @@
 import { useState } from 'react';
 
 import { api, type AgentStateResponse, type AgentStepStatus, type DeckStatePayload } from '../api/client';
+import { Signature } from './Signature';
 
 interface AgentQueueProps {
   state: AgentStateResponse;
@@ -176,15 +177,12 @@ function AgentRow({
           <span style={{ font: '500 11.5px/1 var(--p-mono)', color: 'var(--p-muted-deep)' }}>
             {String(n).padStart(2, '0')}
           </span>
-          <span
-            style={{
-              font: '500 14px/1.2 var(--p-mono)',
-              color: isPending ? 'var(--p-fg-dim)' : 'var(--p-fg)',
-              transition: 'color 0.25s',
-            }}
-          >
-            {step.signature || step.label}
-          </span>
+          <Signature
+            text={step.signature || step.label}
+            size={14}
+            fgColor={isPending ? 'var(--p-fg-dim)' : 'var(--p-fg)'}
+            style={{ transition: 'color 0.25s' }}
+          />
           <span style={{ flex: 1 }} />
           <TriggerHint step={step} decks={decks} />
         </div>
@@ -192,15 +190,18 @@ function AgentRow({
           style={{
             marginTop: 4,
             marginLeft: 22,
-            font: 'italic 400 13px/1.4 var(--p-serif)',
-            color: isPending ? 'var(--p-muted)' : 'var(--p-fg-dim)',
+            // Mono comment-style label — like a // comment in code,
+            // describing the action in natural language without
+            // switching typographic register.
+            font: '400 12px/1.4 var(--p-mono)',
+            color: 'var(--p-muted)',
             whiteSpace: 'nowrap',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             transition: 'color 0.25s',
           }}
         >
-          {step.label}
+          // {step.label}
         </div>
       </div>
     </div>

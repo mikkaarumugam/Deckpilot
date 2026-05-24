@@ -265,7 +265,7 @@ export function Pilot() {
                   </span>
                   <span
                     style={{
-                      font: 'italic 400 14.5px/1.2 var(--p-serif)',
+                      font: '500 13.5px/1.2 var(--p-mono)',
                       color: 'var(--p-fg)',
                       flex: 1,
                       overflow: 'hidden',
@@ -273,7 +273,7 @@ export function Pilot() {
                       whiteSpace: 'nowrap',
                     }}
                   >
-                    {q.prompt}
+                    › {q.prompt}
                   </span>
                   <span style={{ font: '500 11px/1 var(--p-mono)', color: 'var(--p-muted)' }}>{q.parsed}</span>
                   <button

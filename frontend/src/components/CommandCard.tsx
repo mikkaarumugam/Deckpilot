@@ -23,6 +23,7 @@ import { type Phase, type PlanStepState } from '../types';
 import { PhaseBadge } from './PhaseBadge';
 import { PlanStep } from './PlanStep';
 import { RunButton } from './RunButton';
+import { Signature } from './Signature';
 
 interface CommandCardProps {
   phase: Phase;
@@ -149,21 +150,21 @@ export function CommandCard({
         <PhaseBadge phase={phase} totalSteps={totalSteps} currentStep={currentStep} />
       </div>
 
-      {/* Typed command — real <input> styled to match the design.
-          Bumped from 28px → 48px for hero scale; drama through size
-          instead of decoration (see UI overhaul note). */}
+      {/* Typed command — styled like a REPL prompt. Mono, big, with
+          the ">" prompt indicator in accent. Drops the italic serif
+          (Strudel-style: one typographic register for the whole app). */}
       <div
         style={{
           display: 'flex',
           alignItems: 'baseline',
           gap: 14,
-          font: 'italic 400 48px/1.1 var(--p-serif)',
+          font: '500 36px/1.15 var(--p-mono)',
           color: 'var(--p-fg)',
-          minHeight: 56,
-          letterSpacing: '-0.02em',
+          minHeight: 50,
+          letterSpacing: '-0.01em',
         }}
       >
-        <span style={{ color: 'var(--p-accent)', fontStyle: 'normal' }}>›</span>
+        <span style={{ color: 'var(--p-accent)' }}>›</span>
         <input
           type="text"
           value={text}
@@ -202,12 +203,10 @@ export function CommandCard({
             background: 'var(--p-accent-dim)',
             border: '1px solid var(--p-accent-edge)',
             borderRadius: 8,
-            font: '500 13.5px/1 var(--p-mono)',
-            color: 'var(--p-fg)',
           }}
         >
-          <span style={{ color: 'var(--p-accent)' }}>fn</span>
-          <span>{parsedLabel}</span>
+          <span style={{ font: '500 13.5px/1 var(--p-mono)', color: 'var(--p-accent)' }}>fn</span>
+          <Signature text={parsedLabel} size={13.5} />
         </div>
         {confValue > 0 && (
           <span style={{ font: '400 12px/1 var(--p-mono)', color: 'var(--p-muted)' }}>
@@ -431,7 +430,7 @@ function SuggestionPanel({
       </div>
       <div
         style={{
-          font: 'italic 400 20px/1.3 var(--p-serif)',
+          font: '500 18px/1.3 var(--p-mono)',
           color: 'var(--p-fg)',
           marginBottom: 6,
         }}
@@ -461,12 +460,12 @@ function SuggestionPanel({
             background: 'var(--p-accent-dim)',
             border: '1px solid var(--p-accent-edge)',
             borderRadius: 6,
-            font: 'italic 400 14.5px/1.5 var(--p-serif)',
-            color: 'var(--p-fg)',
+            font: '400 13px/1.5 var(--p-mono)',
+            color: 'var(--p-fg-dim)',
           }}
         >
-          <span style={{ color: 'var(--p-accent)', fontStyle: 'normal', fontWeight: 500, fontFamily: 'var(--p-mono)', fontSize: '12px' }}>
-            Why this track:&nbsp;
+          <span style={{ color: 'var(--p-accent)', fontWeight: 500, fontSize: '12px' }}>
+            // why:&nbsp;
           </span>
           {reasoning}
         </div>
@@ -601,9 +600,8 @@ function SchedulePreview({ schedule }: { schedule: ScheduledPlanPayload[] }) {
             <span
               style={{
                 flex: 1,
-                font: 'italic 400 15.5px/1.2 var(--p-serif)',
+                font: '500 13.5px/1.2 var(--p-mono)',
                 color: 'var(--p-fg)',
-                letterSpacing: '-0.005em',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',

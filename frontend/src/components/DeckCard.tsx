@@ -137,9 +137,8 @@ export function DeckCard({
       <div style={{ minWidth: 0 }}>
         <div
           style={{
-            font: 'italic 400 19px/1.2 var(--p-serif)',
+            font: '500 16px/1.2 var(--p-mono)',
             color: 'var(--p-fg)',
-            letterSpacing: '-0.005em',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
