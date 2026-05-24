@@ -135,6 +135,17 @@ class SetPitch:
 
 
 @dataclass(frozen=True)
+class EjectDeck:
+    """Eject the track currently loaded on `deck`.
+
+    Internal-only action used by reset_plan to bring decks back to a
+    truly empty state. Not exposed in the LLM action vocabulary —
+    ejecting mid-set is a footgun we don't want the model reaching for.
+    """
+    deck: int
+
+
+@dataclass(frozen=True)
 class LoadTrack:
     """Load a library track onto a deck.
 
@@ -168,6 +179,7 @@ DJAction = Union[
     SetFilter,
     SetFx,
     SetPitch,
+    EjectDeck,
     LoadTrack,
 ]
 

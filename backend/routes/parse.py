@@ -60,6 +60,7 @@ _ACTION_NAME = {
     "SetPitch": "set_pitch",
     "HotCue": "hot_cue",
     "Sync": "sync",
+    "EjectDeck": "eject_deck",
     "LoadTrack": "load_track",
 }
 

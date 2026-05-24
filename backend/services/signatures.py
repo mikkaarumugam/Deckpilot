@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from deckpilot.core.actions import (
+    EjectDeck,
     FadeToDeck,
     HotCue,
     LoadTrack,
@@ -59,6 +60,13 @@ def render_action(action: DJAction) -> tuple[str, str, str, int]:
         return (
             f"transport.pause(deck:{action.deck})",
             "set play=0",
+            "—",
+            200,
+        )
+    if isinstance(action, EjectDeck):
+        return (
+            f"library.eject(deck:{action.deck})",
+            "clear loaded track",
             "—",
             200,
         )

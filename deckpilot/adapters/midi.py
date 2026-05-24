@@ -22,6 +22,7 @@ from deckpilot.adapters.base import Adapter
 from deckpilot.core.actions import (
     LOOP_BEAT_SIZES,
     DJAction,
+    EjectDeck,
     HotCue,
     LoadTrack,
     LoopDeck,
@@ -76,6 +77,9 @@ CONTROL_CHANGE = 0xB0
 # Play/pause (script bindings in Mixxx — separate notes for each intent).
 PLAY_NOTES = {1: 0x3C, 2: 0x3E}     # 60, 62
 PAUSE_NOTES = {1: 0x3D, 2: 0x3F}    # 61, 63
+
+# Eject (direct `eject` control binding in Mixxx — momentary button).
+EJECT_NOTES = {1: 0x56, 2: 0x57}    # 86, 87
 
 # Crossfader (CC 20).
 CROSSFADER_CC = 0x14
@@ -187,6 +191,9 @@ class MidiAdapter(Adapter):
         elif isinstance(action, PauseDeck):
             self._note_on(PAUSE_NOTES[action.deck], velocity=127)
 
+        elif isinstance(action, EjectDeck):
+            self._note_on(EJECT_NOTES[action.deck], velocity=127)
+
         elif isinstance(action, SetCrossfader):
             clamped = max(0.0, min(1.0, action.value))
             self._cc(CROSSFADER_CC, round(clamped * 127))
@@ -206,8 +213,15 @@ class MidiAdapter(Adapter):
             self._note_off(note)
 
         elif isinstance(action, SetEQ):
+            # Mixxx's EQ control range is 0..4 and the default skin renders
+            # the rotary linearly across that range, so visual centre = 2.0
+            # (technically ~+6 dB, not unity). We map value 1.0 to CC 64 →
+            # Mixxx 2.0 to keep the knob visually centred after a reset or
+            # bass-swap restore. The audible boost is the trade-off; in
+            # practice a centred knob is the stronger UX signal for "back
+            # to neutral" than audibly-flat-but-visibly-off-centre.
             clamped = max(0.0, min(1.0, action.value))
-            self._cc(EQ_CC[(action.deck, action.band)], round(clamped * 127))
+            self._cc(EQ_CC[(action.deck, action.band)], round(clamped * 64))
 
         elif isinstance(action, SetVolume):
             clamped = max(0.0, min(1.0, action.value))

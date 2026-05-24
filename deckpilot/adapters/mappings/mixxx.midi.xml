@@ -68,6 +68,25 @@ Binding modes:
             </control>
 
             <!-- =================================================================== -->
+            <!-- Eject (notes 0x56, 0x57). Bound directly to Mixxx's `eject`
+                 control — momentary button: a single note_on triggers an eject.
+                 Used by core.undo.reset_plan to clear both decks. Keep the
+                 EJECT_NOTES table in adapters/midi.py in sync. -->
+            <!-- =================================================================== -->
+            <control>
+                <group>[Channel1]</group>
+                <key>eject</key>
+                <status>0x90</status><midino>0x56</midino>
+                <options><normal/></options>
+            </control>
+            <control>
+                <group>[Channel2]</group>
+                <key>eject</key>
+                <status>0x90</status><midino>0x57</midino>
+                <options><normal/></options>
+            </control>
+
+            <!-- =================================================================== -->
             <!-- Crossfader (CC 20) -->
             <!-- =================================================================== -->
             <control>

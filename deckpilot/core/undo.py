@@ -19,6 +19,7 @@ from __future__ import annotations
 from deckpilot.core.actions import (
     ActionPlan,
     DJAction,
+    EjectDeck,
     FadeToDeck,
     HotCue,
     LoopDeck,
@@ -71,22 +72,29 @@ def inverse_action(action: DJAction) -> DJAction | None:
         return SetFx(deck=action.deck, unit=action.unit, value=NEUTRAL_FX)
     if isinstance(action, SetPitch):
         return SetPitch(deck=action.deck, value=NEUTRAL_PITCH)
-    # NudgeDeck, HotCue, Sync are transient/stateful in ways we can't cleanly
-    # undo without tracking prior state. Return None to skip them.
-    if isinstance(action, (NudgeDeck, HotCue, Sync)):
+    # NudgeDeck, HotCue, Sync, EjectDeck are transient/stateful in ways we
+    # can't cleanly undo without tracking prior state. Return None to skip them.
+    if isinstance(action, (NudgeDeck, HotCue, Sync, EjectDeck)):
         return None
     return None
 
 
 def reset_plan() -> ActionPlan:
     """
-    Return a 'go to known-good state' plan: pause both decks, crossfader to
-    center, all EQs to neutral, volumes to full. Useful as a panic button
-    when the system gets into a weird state mid-set.
+    Return a 'go to known-good state' plan: pause both decks, eject any
+    loaded tracks, crossfader to center, all EQs/filter/pitch/FX to neutral,
+    volumes to full. Useful as a panic button when the system gets into a
+    weird state mid-set.
     """
+    # Pause first so the eject doesn't fire on a still-playing deck (Mixxx
+    # ignores eject while playing). Eject before resetting knobs so the
+    # following EQ/filter/etc. tweaks land on empty decks — cosmetic, but
+    # keeps the Mixxx UI tidy if a track was loaded.
     steps: list[TimedAction] = [
         TimedAction(action=PauseDeck(deck=1), at_seconds=0.0),
         TimedAction(action=PauseDeck(deck=2), at_seconds=0.0),
+        TimedAction(action=EjectDeck(deck=1), at_seconds=0.0),
+        TimedAction(action=EjectDeck(deck=2), at_seconds=0.0),
         TimedAction(action=SetCrossfader(value=NEUTRAL_CROSSFADER), at_seconds=0.0),
         TimedAction(action=SetVolume(deck=1, value=NEUTRAL_VOLUME), at_seconds=0.0),
         TimedAction(action=SetVolume(deck=2, value=NEUTRAL_VOLUME), at_seconds=0.0),
