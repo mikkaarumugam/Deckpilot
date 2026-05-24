@@ -547,10 +547,13 @@ function SuggestionPanel({
 }
 
 /** SchedulePreview — shown when parseResult.schedule is populated (a
- *  D-021 goal-style response). Renders each scheduled step as a row
- *  with its trigger description and the count of atomic actions
- *  inside. The Run button (above) dispatches to /agent/start; once
- *  running, the AgentQueue panel takes over the visualisation. */
+ *  D-021/D-023 goal-style response). Each scheduled step gets a
+ *  header row (label + trigger) with its inner atomic actions
+ *  rendered underneath as a nested PlanStep timeline. This preserves
+ *  the "depth of decomposition" visual that the streaming view shows
+ *  — collapsing schedule steps to one-liner rows threw away the most
+ *  impressive part of the parse, which is exactly what the audience
+ *  should see before they hit Run. */
 function SchedulePreview({ schedule }: { schedule: ScheduledPlanPayload[] }) {
   return (
     <div
@@ -574,64 +577,94 @@ function SchedulePreview({ schedule }: { schedule: ScheduledPlanPayload[] }) {
       >
         <span>🤖 Agent schedule · {schedule.length} step{schedule.length === 1 ? '' : 's'}</span>
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
         {schedule.map((step, i) => (
-          <div
-            key={i}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 12,
-              padding: '8px 12px',
-              background: 'var(--p-surface)',
-              border: '1px solid var(--p-border)',
-              borderRadius: 8,
-            }}
-          >
-            <span
-              style={{
-                font: '500 11px/1 var(--p-mono)',
-                color: 'var(--p-muted-deep)',
-                width: 18,
-              }}
-            >
-              {String(i + 1).padStart(2, '0')}
-            </span>
-            <span
-              style={{
-                flex: 1,
-                font: '500 13.5px/1.2 var(--p-mono)',
-                color: 'var(--p-fg)',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {step.label}
-            </span>
-            <span style={{ font: '500 10.5px/1 var(--p-mono)', color: 'var(--p-muted)' }}>
-              {describeTriggerInline(step)}
-            </span>
-            <span
-              style={{
-                font: '500 10.5px/1 var(--p-mono)',
-                color: 'var(--p-muted-deep)',
-                letterSpacing: '0.04em',
-              }}
-            >
-              {step.plan.length} {step.plan.length === 1 ? 'act' : 'acts'}
-            </span>
-          </div>
+          <ScheduledStepGroup key={i} n={i + 1} step={step} />
         ))}
       </div>
       <div
         style={{
-          marginTop: 10,
+          marginTop: 14,
           font: '400 11.5px/1.4 var(--p-mono)',
           color: 'var(--p-muted)',
         }}
       >
         Hit Run to start. The agent will fire each step when its trigger condition hits.
+      </div>
+    </div>
+  );
+}
+
+/** One scheduled step rendered as: header row (step number + label +
+ *  trigger description) followed by its inner ActionPlan as a nested
+ *  rail-and-node timeline. Each inner action uses PlanStep with state
+ *  fixed to 'pending' — this is a preview, no execution yet. */
+function ScheduledStepGroup({ n, step }: { n: number; step: ScheduledPlanPayload }) {
+  return (
+    <div
+      style={{
+        background: 'var(--p-surface)',
+        border: '1px solid var(--p-border)',
+        borderRadius: 10,
+        padding: '12px 14px 14px',
+      }}
+    >
+      {/* Header: step number + label + trigger + action count */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'baseline',
+          gap: 10,
+          marginBottom: 12,
+          paddingBottom: 10,
+          borderBottom: '1px dashed var(--p-border)',
+        }}
+      >
+        <span
+          style={{
+            font: '500 11px/1 var(--p-mono)',
+            color: 'var(--p-muted-deep)',
+            width: 18,
+          }}
+        >
+          {String(n).padStart(2, '0')}
+        </span>
+        <span
+          style={{
+            flex: 1,
+            font: '500 13.5px/1.2 var(--p-mono)',
+            color: 'var(--p-fg)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {step.label}
+        </span>
+        <span style={{ font: '500 10.5px/1 var(--p-mono)', color: 'var(--p-accent)' }}>
+          {describeTriggerInline(step)}
+        </span>
+        <span
+          style={{
+            font: '500 10.5px/1 var(--p-mono)',
+            color: 'var(--p-muted-deep)',
+            letterSpacing: '0.04em',
+          }}
+        >
+          {step.plan.length} {step.plan.length === 1 ? 'act' : 'acts'}
+        </span>
+      </div>
+      {/* Inner plan — same rail+node treatment as a flat plan */}
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        {step.plan.map((act, j) => (
+          <PlanStep
+            key={j}
+            n={j + 1}
+            step={act}
+            last={j === step.plan.length - 1}
+            state="pending"
+          />
+        ))}
       </div>
     </div>
   );
