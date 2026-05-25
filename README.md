@@ -2,7 +2,7 @@
 
 > **I'm looking for AI product roles.** I don't write code. I prompt, scope, evaluate, and direct. DeckPilot is the artifact of that loop applied to a real-time AI product, built in one weekend.
 
-**Talk to your decks.** Type a DJ command — *"echo deck 1 out into deck 2"*, *"in 16 beats filter sweep back to deck 1"* — and an AI parses it, plans a multi-step musical move, and executes it inside [Mixxx](https://mixxx.org) via virtual MIDI. The agent layer counts beats and fires transitions autonomously.
+**Talk to your decks.** Type a DJ command like *"echo deck 1 out into deck 2"* or *"in 16 beats filter sweep back to deck 1"*, and an AI parses it, plans a multi-step musical move, and executes it inside [Mixxx](https://mixxx.org) via virtual MIDI. The agent layer counts beats and fires transitions autonomously.
 
 https://github.com/user-attachments/assets/4dcd1f69-4b4d-43d0-94e9-b86f40e5d8dc
 
@@ -15,11 +15,11 @@ https://github.com/user-attachments/assets/4dcd1f69-4b4d-43d0-94e9-b86f40e5d8dc
 Most "AI PM portfolio" projects are RAG chatbots that show three working examples. This one ships with:
 
 - **A [45-case eval suite](docs/EVAL.md)** with methodology, latency p50/p95, source-split (regex vs LLM), and a failure-mode taxonomy. Most AI demos never measure whether the AI gets it right.
-- **[23 architecture decision records](docs/DECISIONS.md)** documenting every product call — context, alternatives considered, trade-offs, what I'd change in production.
+- **[23 architecture decision records](docs/DECISIONS.md)** documenting every product call: context, alternatives considered, trade-offs, what I'd change in production.
 - **An autonomous agent layer** that counts musical beats in real time and fires transitions on its own. Goal-style prompts in, multi-step musical plans out.
-- **A real-time creative product, not a chatbot.** Hard constraints — audio latency, hardware integration, musical correctness — the kind that punish loose thinking.
+- **A real-time creative product, not a chatbot.** Hard constraints like audio latency, hardware integration, and musical correctness. The kind that punish loose thinking.
 
-Every line of Python and TypeScript was written by Claude. Every decision about what to build, why, and what to cut was mine. **That's the AI PM loop.** The product is the artifact; the skill being demonstrated is the loop.
+Every product decision was mine. That's the AI PM loop. The product is the artifact; the skill being demonstrated is the loop.
 
 ---
 
@@ -27,31 +27,31 @@ Every line of Python and TypeScript was written by Claude. Every decision about 
 
 **I can scope ruthlessly.** I cut stems isolation, multi-tenant deployment, voice integration, hardware controller support, and three other features that didn't survive the weekend budget. [`docs/ROADMAP.md`](docs/ROADMAP.md) lists what's in, what's deferred, and what I explicitly won't build.
 
-**I think in failure modes, not happy paths.** The eval doc has a [failure-mode taxonomy](docs/EVAL.md). The undo system, the plan-visible-before-audible UX, and the "no confirmation" decision are all designed around bounded cost-of-error — not preventing errors that can't be prevented.
+**I think in failure modes, not happy paths.** The eval doc has a [failure-mode taxonomy](docs/EVAL.md). The undo system, the plan-visible-before-audible UX, and the "no confirmation" decision are all designed around bounded cost-of-error, not preventing errors that can't be prevented.
 
-**I pivot fast when the architecture supports it.** First target was VirtualDJ. After ~30 min I discovered VDJ Home throttles unrecognized MIDI controllers to 10 minutes per launch — actions silently no-op past that. Pivoted to Mixxx in under an hour because the adapter pattern was already drawn ([D-002](docs/DECISIONS.md)). Same weekend: pivoted from Anthropic SDK to `claude -p` CLI to avoid metered API costs ([D-007](docs/DECISIONS.md)). Both swaps shipped because the boundaries were right.
+**I pivot fast when the architecture supports it.** First target was VirtualDJ. After ~30 min I discovered VDJ Home throttles unrecognized MIDI controllers to 10 minutes per launch; actions silently no-op past that. Pivoted to Mixxx in under an hour because the adapter pattern was already drawn ([D-002](docs/DECISIONS.md)). Same weekend: pivoted from Anthropic SDK to `claude -p` CLI to avoid metered API costs ([D-007](docs/DECISIONS.md)). Both swaps shipped because the boundaries were right.
 
-**I treat the prompt as the product.** The AI picks *bass swap* vs *filter sweep* vs *echo out* vs *drop swap* based on the verb in your command. Not because of model capability — because I gave it four distinct few-shot examples keyed to four distinct verbs. One prompt edit unlocks four genuinely different musical behaviours from the same model. That's the production lever most AI demos never touch.
+**I treat the prompt as the product.** The AI picks *bass swap* vs *filter sweep* vs *echo out* vs *drop swap* based on the verb in your command. Not because of model capability, but because I gave it four distinct few-shot examples keyed to four distinct verbs. One prompt edit unlocks four genuinely different musical behaviours from the same model. That's the production lever most AI demos never touch.
 
-**I measure trust quantitatively.** The 45-case eval defines what "correct" means in writing, with falsifiable assertions and a methodology that handles the LLM's non-determinism. The accuracy number isn't the signal — **the methodology is**.
+**I measure trust quantitatively.** The 45-case eval defines what "correct" means in writing, with falsifiable assertions and a methodology that handles the LLM's non-determinism. The accuracy number isn't the signal. **The methodology is.**
 
 **I know when to *not* ask.** Real-time creative tools die under confirmation dialogs. I replaced "ask permission" with three things together: parsed plan renders *before* audio fires (eyes confirm before ears), one-click undo on everything reversible (bounded cost-of-error), and the eval suite (earned right to act). Full reasoning in [D-008](docs/DECISIONS.md).
 
 ---
 
-## What I directed vs what Claude wrote
+## What I directed vs what got implemented
 
-| I did | Claude did |
+| I did | The AI implemented |
 |---|---|
-| Scoped the product to "natural language → MIDI → Mixxx" and cut everything else | Wrote ~3,000 lines of Python + TypeScript |
-| Decided the structured action vocabulary (LLM emits typed actions, never raw MIDI) | Implemented the dataclasses, executor, adapter, parser |
-| Chose Mixxx over VDJ after the 10-min throttle bug | Wrote the Mixxx MIDI mapping XML + JS scripts |
-| Designed the four-tier capability stack (translate → compose → reason → autonomous) | Built each tier when I asked |
-| Wrote every system prompt — the four transition styles, the deck-default rule, the JSON validator schema | Tested prompts, surfaced failures, suggested fixes |
-| Authored the 45-case eval methodology and what counts as "correct" | Wrote the eval harness |
+| Scoped the product to "natural language → MIDI → Mixxx" and cut everything else | Python parser, executor, adapter; React frontend; FastAPI backend |
+| Decided the structured action vocabulary (LLM emits typed actions, never raw MIDI) | The 13 action dataclasses, executor, adapter, parser |
+| Chose Mixxx over VDJ after the 10-min throttle bug | The Mixxx MIDI mapping XML and JS scripts |
+| Designed the four-tier capability stack (translate → compose → reason → autonomous) | Each tier when I asked |
+| Wrote every system prompt: four transition styles, deck-default rule, JSON validator schema | Tested prompts, surfaced failures, suggested fixes |
+| Authored the 45-case eval methodology and what counts as "correct" | The eval harness |
 | Made every architecture-decision call documented in [`DECISIONS.md`](docs/DECISIONS.md) | Captured the *why-not-what* in writing |
 | Picked Haiku over Sonnet/Opus and articulated when to upgrade | Wired the model selector |
-| Designed the demo above (track pairing, transition arc, voiceover beats) | None — the demo is mine |
+| Designed the demo above (track pairing, transition arc, voiceover beats) | None. The demo is mine. |
 
 **The product is what I shipped. The skill being demonstrated is the loop.**
 
@@ -59,13 +59,13 @@ Every line of Python and TypeScript was written by Claude. Every decision about 
 
 ## How the demo works, walked through
 
-1. `play deck 1` — *Around The World* drops. Regex fast-path, sub-millisecond parse.
-2. `loop deck 1 over 8 beats` — loop holds the chorus, builds tension.
-3. `exit loop` — release.
-4. `echo deck 1 out into deck 2 over 8 seconds` — *Around The World* trails into FX wet as *One More Time* fades in. The AI picks an FX-led transition because of the verb "echo," not a generic crossfade.
-5. `in 16 beats filter sweep back to deck 1` — agent schedule. DeckPilot counts beats off *One More Time* and autonomously sweeps the filter back on beat 16. I do nothing for ~7 seconds; it runs the mix.
+1. `play deck 1` plays *Around The World*. Regex fast-path, sub-millisecond parse.
+2. `loop deck 1 over 8 beats` holds the chorus and builds tension.
+3. `exit loop` releases.
+4. `echo deck 1 out into deck 2 over 8 seconds` trails *Around The World* into FX wet as *One More Time* fades in. The AI picks an FX-led transition because of the verb "echo," not a generic crossfade.
+5. `in 16 beats filter sweep back to deck 1` is an agent schedule. DeckPilot counts beats off *One More Time* and autonomously sweeps the filter back on beat 16. I do nothing for ~7 seconds; it runs the mix.
 
-The single architectural call worth flagging: **the AI never emits raw MIDI.** It emits one of 13 typed actions; a deterministic Python layer translates each into MIDI. That gives testability, safety, and portability — the VirtualDJ → Mixxx pivot took an hour because of this. Full explainer: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+The architectural call worth flagging: **the AI never emits raw MIDI.** It emits one of 13 typed actions, and a deterministic Python layer translates each into MIDI. That gives testability, safety, and portability. The VirtualDJ → Mixxx pivot took an hour because of this. Full explainer in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ---
 
@@ -81,14 +81,14 @@ These are the artifacts a hiring manager should actually open:
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Pipeline explainer, action vocabulary, executor design. |
 | [`docs/AGENT_DESIGN.md`](docs/AGENT_DESIGN.md) | Why musical-time triggers exist, the state-in-runtime vs state-in-trigger debate, what's parked for v0.4. |
 | [`docs/GOTCHAS.md`](docs/GOTCHAS.md) | Every debugging trap I paid for. The honest version of what shipping involved. |
-| [`docs/INTERVIEW_NARRATIVE.md`](docs/INTERVIEW_NARRATIVE.md) | How I tell this story in interviews — 60-second pitch, Q&A, the senior-PM lines worth memorizing. |
+| [`docs/INTERVIEW_NARRATIVE.md`](docs/INTERVIEW_NARRATIVE.md) | How I tell this story in interviews. 60-second pitch, Q&A, the senior-PM lines worth memorizing. |
 | [`CLAUDE.md`](CLAUDE.md) | What I tell Claude at the start of every session in this repo. The "system prompt" for my engineering loop. |
 
 ---
 
 ## Try it yourself
 
-macOS only. Requires Mixxx (free) + Claude Code CLI (uses your Claude subscription, no API costs).
+macOS only. Requires Mixxx (free) and the Claude Code CLI (uses your Claude subscription, no API costs).
 
 ```bash
 git clone https://github.com/mikkaarumugam/Deckpilot.git && cd Deckpilot
@@ -125,9 +125,9 @@ Full setup pitfalls in [`docs/GOTCHAS.md`](docs/GOTCHAS.md).
 
 ## Why this project exists
 
-To prove I can ship an end-to-end AI product, not just talk about one. Most AI PM portfolios are RAG chatbots; I wanted something real-time, creative, with hard constraints (audio latency, hardware integration, musical correctness) — the kind of product where prompt design and scoping discipline visibly matter. The intersection of LLMs and a real-time creative tool felt underexplored.
+To prove I can ship an end-to-end AI product, not just talk about one. Most AI PM portfolios are RAG chatbots. I wanted something real-time and creative, with hard constraints (audio latency, hardware integration, musical correctness). The kind of product where prompt design and scoping discipline visibly matter. The intersection of LLMs and a real-time creative tool felt underexplored.
 
-So I prompted Claude to build it, made every decision along the way, and documented the loop.
+So I prompted, made every decision along the way, and documented the loop.
 
 **If you're hiring for AI product roles and this is what your team does day-to-day, I'd love to talk.**
 
